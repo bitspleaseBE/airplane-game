@@ -1,0 +1,45 @@
+; Engine configuration file.
+; Bastion Bomber — portrait top-down siege PoC
+
+config_version=5
+
+[application]
+
+config/name="Bastion Bomber"
+config/description="Deploy bomber swarms and bring down the island fortress."
+config/version="0.1.0"
+run/main_scene="res://scenes/main.tscn"
+config/features=PackedStringArray("4.7", "GL Compatibility")
+config/icon="res://assets/planes/bomber.png"
+
+[autoload]
+
+GameConfig="*res://scripts/game_config.gd"
+
+[display]
+
+window/size/viewport_width=720
+window/size/viewport_height=1280
+window/size/window_width_override=360
+window/size/window_height_override=640
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+window/handheld/orientation=1
+
+[input_devices]
+
+pointing/emulate_touch_from_mouse=true
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+textures/vram_compression/import_etc2_astc=true
+environment/defaults/default_clear_color=Color(0.22, 0.48, 0.62, 1)
+
+[layer_names]
+
+2d_physics/layer_1="world"
+2d_physics/layer_2="planes"
+2d_physics/layer_3="bullets"
+2d_physics/layer_4="defenses"

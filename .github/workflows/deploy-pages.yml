@@ -1,0 +1,102 @@
+# Deploy Godot Web export to GitHub Pages.
+#
+# Requires (once the Godot project exists at the repo root):
+#   - project.godot
+#   - export_presets.cfg with a preset named exactly "Web"
+#
+# Until those exist, the export step will fail.
+
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  GODOT_VERSION: "4.7.1"
+  GODOT_STATUS: "stable"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache Godot editor and templates
+        id: cache-godot
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/godot
+            ~/.local/share/godot/export_templates
+          key: godot-${{ env.GODOT_VERSION }}-${{ env.GODOT_STATUS }}-linux-web
+
+      - name: Download Godot editor
+        if: steps.cache-godot.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/godot
+          curl -L -o /tmp/godot.zip \
+            "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-${GODOT_STATUS}/Godot_v${GODOT_VERSION}-${GODOT_STATUS}_linux.x86_64.zip"
+          unzip -o /tmp/godot.zip -d ~/godot
+          mv ~/godot/Godot_v${GODOT_VERSION}-${GODOT_STATUS}_linux.x86_64 ~/godot/godot
+          chmod +x ~/godot/godot
+
+      - name: Download export templates
+        if: steps.cache-godot.outputs.cache-hit != 'true'
+        run: |
+          curl -L -o /tmp/templates.tpz \
+            "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-${GODOT_STATUS}/Godot_v${GODOT_VERSION}-${GODOT_STATUS}_export_templates.tpz"
+          mkdir -p ~/.local/share/godot/export_templates/${GODOT_VERSION}.${GODOT_STATUS}
+          unzip -o /tmp/templates.tpz -d /tmp/godot-templates
+          mv /tmp/godot-templates/templates/* ~/.local/share/godot/export_templates/${GODOT_VERSION}.${GODOT_STATUS}/
+
+      - name: Import project (warm-up .godot cache)
+        run: |
+          ~/godot/godot --headless --import || true
+
+      - name: Export Web release
+        run: |
+          mkdir -p build/web
+          ~/godot/godot --headless --export-release "Web" build/web/index.html
+
+      - name: Add .nojekyll
+        run: touch build/web/.nojekyll
+
+      - name: Add COI service worker for SharedArrayBuffer
+        run: |
+          curl -L -o build/web/coi-serviceworker.js \
+            "https://raw.githubusercontent.com/gzuidhof/coi-serviceworker/master/coi-serviceworker.js"
+          # Inject script as the first tag in <head> so isolation headers apply before Godot loads.
+          sed -i 's|<head>|<head>\n<script src="coi-serviceworker.js"></script>|' build/web/index.html
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

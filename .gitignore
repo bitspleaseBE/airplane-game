@@ -1,0 +1,18 @@
+# Godot 4+ ignores
+.godot/
+*.translation
+export_presets.cfg.bak
+
+# Build outputs
+build/
+*.apk
+*.aab
+*.ipa
+*.xcframework
+*.pck
+
+# OS / editor
+.DS_Store
+*~
+*.swp
+.import/
