@@ -14,6 +14,15 @@ Or open this folder in the Godot 4.7 editor and press Play.
 
 **Controls:** tap / click the blue water around the island to spawn a bomber. You have a fixed squadron of 15. Destroy the central keep to win; spend the squadron with the keep still standing and you lose.
 
+## Automated playtest
+
+```bash
+tools/playtest.sh                 # deploy 6 bombers, screenshot every 3s, ~25s
+tools/playtest.sh --planes=15 --duration=60   # full run to a win/lose ending
+```
+
+Simulates taps, saves screenshots and a `summary.json` to `playtest/latest/`, and prints a `PLAYTEST_SUMMARY` JSON line. Agents follow the write code → playtest → improve loop in `.cursor/skills/playtest-loop/`.
+
 ## Project layout
 
 - `scenes/` — main level, plane, turret, keep, bullet, HUD

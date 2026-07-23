@@ -5,6 +5,7 @@ export_presets.cfg.bak
 
 # Build outputs
 build/
+playtest/
 *.apk
 *.aab
 *.ipa

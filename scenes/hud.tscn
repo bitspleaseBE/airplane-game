@@ -1,6 +1,7 @@
-[gd_scene load_steps=5 format=3]
+[gd_scene load_steps=6 format=3]
 
 [ext_resource type="Script" path="res://scripts/hud.gd" id="1"]
+[ext_resource type="Texture2D" path="res://assets/ui/speaker_on.png" id="2"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_bar_bg"]
 bg_color = Color(0.12, 0.14, 0.16, 0.85)
@@ -26,6 +27,38 @@ content_margin_left = 18
 content_margin_top = 12
 content_margin_right = 18
 content_margin_bottom = 12
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_sound"]
+bg_color = Color(0.95, 0.88, 0.55, 0.92)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.2, 0.16, 0.08, 0.55)
+corner_radius_top_left = 12
+corner_radius_top_right = 12
+corner_radius_bottom_right = 12
+corner_radius_bottom_left = 12
+content_margin_left = 8
+content_margin_top = 8
+content_margin_right = 8
+content_margin_bottom = 8
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_sound_hover"]
+bg_color = Color(1, 0.94, 0.65, 1)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.2, 0.16, 0.08, 0.7)
+corner_radius_top_left = 12
+corner_radius_top_right = 12
+corner_radius_bottom_right = 12
+corner_radius_bottom_left = 12
+content_margin_left = 8
+content_margin_top = 8
+content_margin_right = 8
+content_margin_bottom = 8
 
 [node name="HUD" type="CanvasLayer"]
 layer = 10
@@ -75,6 +108,21 @@ max_value = 100.0
 value = 100.0
 show_percentage = false
 
+[node name="SoundButton" type="Button" parent="Root/TopBar"]
+custom_minimum_size = Vector2(56, 56)
+layout_mode = 2
+size_flags_vertical = 4
+focus_mode = 0
+theme_override_constants/icon_max_width = 36
+theme_override_styles/normal = SubResource("StyleBoxFlat_sound")
+theme_override_styles/hover = SubResource("StyleBoxFlat_sound_hover")
+theme_override_styles/pressed = SubResource("StyleBoxFlat_sound_hover")
+theme_override_styles/focus = SubResource("StyleBoxFlat_sound")
+icon = ExtResource("2")
+icon_alignment = 1
+expand_icon = true
+tooltip_text = "Sound on"
+
 [node name="Title" type="Label" parent="Root"]
 layout_mode = 1
 anchors_preset = 5
@@ -105,8 +153,8 @@ grow_horizontal = 2
 grow_vertical = 0
 theme_override_colors/font_color = Color(0.92, 0.94, 0.9, 0.9)
 theme_override_font_sizes/font_size = 22
-text = "Tap the water around the island
-to deploy a bomber"
+text = "Tap the water, ace —
+scramble the bombers"
 horizontal_alignment = 1
 vertical_alignment = 1
 

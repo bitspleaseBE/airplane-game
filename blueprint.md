@@ -38,7 +38,8 @@ Two sentences, max. What is this game and why is it fun?
 
 - **Lose when:** Squadron is spent (all planes used or destroyed) and the keep still stands.
 - **Run structure:** [ ] endless + score · [ ] survive N waves = win · [x] level-based campaign
-- **Target run length:** ~1–2 minutes per level (v1 has a single island).
+- **Target run length:** Full game 2–5 minutes, rather too short than too long; ~30–90 seconds per level.
+- **Difficulty curve:** Harder every level, exactly one new thing per level; dumping the whole squadron at once wins early levels but must fail later ones (gates in `.cursor/skills/design-gates/`).
 
 ## 6. Player persona
 
@@ -55,8 +56,8 @@ Two sentences, max. What is this game and why is it fun?
 
 ## 8. Tone of voice
 
-- **In-game text sounds like:** Short, punchy ops radio — light and playful, not grim.
-- **Example line we'd actually ship:** “Keep still standing. Squadron spent.”
+- **In-game text sounds like:** Cool, badass, military-bro radio chatter — confident swagger, a bit over the top, never grim.
+- **Example line we'd actually ship:** “BASTION DOWN. Nothing left but smoke and glory.”
 
 ## 9. Visual style
 
@@ -67,6 +68,7 @@ Two sentences, max. What is this game and why is it fun?
 ## 10. Audio direction
 
 - **SFX character:** Soft cartoon hits, whooshes, small booms (CC0 if added).
+- **Ambience:** Soft looping beach / birds island bed for cinematic mood (under combat SFX).
 - **Music:** None for v1 PoC (silent is fine).
 
 ## 11. Scope & success (the honesty section)
