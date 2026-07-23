@@ -1,0 +1,19 @@
+---
+description: Bump the game version and codename before every git push
+alwaysApply: true
+---
+
+# Version Bump Before Push
+
+The game version lives in **one place**: `config/version` in `project.godot`, formatted as `MAJOR.MINOR.PATCH - Codename` (e.g. `1.0.0 - Bomber`). The HUD reads it at runtime and shows it bottom-left, so no other file needs editing.
+
+**Before every `git push`, update `config/version`:**
+
+1. Bump the semver part based on what's being pushed:
+   - **PATCH** — bug fixes, tweaks, asset swaps
+   - **MINOR** — new features or gameplay changes
+   - **MAJOR** — big milestones or reworks
+2. Pick a **new codename keyword** for the release — a short, thematic word fitting the game (aviation/siege themed: e.g. Bomber, Turret, Bastion, Squadron, Sortie, Flak).
+3. Include the version change in the commit being pushed (never push with a stale version).
+
+Example: `config/version="1.0.0 - Bomber"` → `config/version="1.1.0 - Sortie"`

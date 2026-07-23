@@ -7,7 +7,7 @@ config_version=5
 
 config/name="Bastion Bomber"
 config/description="Deploy bomber swarms and bring down the island fortress."
-config/version="0.1.0"
+config/version="1.0.1 - Flak"
 run/main_scene="res://scenes/main.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
 config/icon="res://assets/planes/bomber.png"
@@ -35,7 +35,7 @@ pointing/emulate_touch_from_mouse=true
 renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
 textures/vram_compression/import_etc2_astc=true
-environment/defaults/default_clear_color=Color(0.22, 0.48, 0.62, 1)
+environment/defaults/default_clear_color=Color(0.42, 0.72, 0.88, 1)
 
 [layer_names]
 

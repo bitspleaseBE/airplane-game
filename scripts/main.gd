@@ -28,6 +28,8 @@ const HOLD_SPAWN_INTERVAL := 0.5
 var _plane_scene: PackedScene = preload("res://scenes/plane.tscn")
 var _explosion_scene: PackedScene = preload("res://scenes/explosion.tscn")
 
+enum Boom { BOMB, CRASH, BIG }
+
 
 func _ready() -> void:
 	randomize()
@@ -92,7 +94,7 @@ func _try_spawn(world_pos: Vector2) -> void:
 	planes.add_child(plane)
 	plane.setup(world_pos, GameConfig.ISLAND_CENTER, self)
 	plane.finished.connect(_on_plane_finished)
-	plane.exploded.connect(_spawn_explosion)
+	plane.exploded.connect(func(pos: Vector2) -> void: _spawn_explosion(pos, 1.0, Boom.CRASH))
 
 
 func _on_plane_finished(_delivered_bomb: bool) -> void:
@@ -108,7 +110,7 @@ func _on_keep_hp_changed(current: int, maximum: int) -> void:
 func _on_keep_destroyed() -> void:
 	if state != State.PLAYING:
 		return
-	_spawn_explosion(keep.global_position, 2.2)
+	_spawn_explosion(keep.global_position, 2.2, Boom.BIG)
 	_set_won()
 
 
@@ -127,7 +129,7 @@ func restart() -> void:
 
 
 func apply_bomb_at(pos: Vector2, damage: int) -> void:
-	_spawn_explosion(pos, 1.0)
+	_spawn_explosion(pos, 1.0, Boom.BOMB)
 	# Damage keep if close
 	if pos.distance_to(keep.global_position) <= GameConfig.PLANE_BOMB_RADIUS + GameConfig.KEEP_RADIUS * 0.35:
 		keep.take_damage(damage)
@@ -146,11 +148,18 @@ func get_planes() -> Array:
 	return planes.get_children()
 
 
-func _spawn_explosion(pos: Vector2, scale_mul: float = 1.0) -> void:
+func _spawn_explosion(pos: Vector2, scale_mul: float = 1.0, boom: Boom = Boom.BOMB) -> void:
 	var fx: Node2D = _explosion_scene.instantiate()
 	effects.add_child(fx)
 	fx.global_position = pos
 	fx.scale = Vector2.ONE * scale_mul
+	match boom:
+		Boom.BOMB:
+			Sfx.bomb(self)
+		Boom.CRASH:
+			Sfx.plane_crash(self)
+		Boom.BIG:
+			Sfx.big_boom(self)
 
 
 func _emit_hud() -> void:
@@ -162,52 +171,39 @@ func _wire_turrets() -> void:
 	for turret in turrets_root.get_children():
 		if turret is Turret:
 			turret.configure(self)
-			turret.destroyed.connect(func(pos: Vector2): _spawn_explosion(pos, 1.4))
+			turret.destroyed.connect(func(pos: Vector2) -> void: _spawn_explosion(pos, 1.4, Boom.BOMB))
 
 
 func _build_island_decor() -> void:
 	var island := $Island
-	var grass_tex: Texture2D = preload("res://assets/terrain/grass.png")
-	var sand_tex: Texture2D = preload("res://assets/terrain/sand.png")
+	var base_tex: Texture2D = preload("res://assets/terrain/island_base.png")
 	var tree_tex: Texture2D = preload("res://assets/terrain/tree.png")
-
-	# Ocean → beach ring → grass fringe → open courtyard under fort.
-	var tile := 56.0
-	var radius := GameConfig.ISLAND_RADIUS
 	var center := GameConfig.ISLAND_CENTER
 	var fort_clear := GameConfig.FORT_CLEAR_RADIUS
-	for x in range(-6, 7):
-		for y in range(-6, 7):
-			var local := Vector2(x * tile * 0.78, y * tile * 0.78)
-			var d := local.length()
-			if d > radius or d < fort_clear * 0.55:
-				continue
-			var spr := Sprite2D.new()
-			# Outer band = beach sand, inner band = grass approaching the fort
-			if d > radius * 0.78:
-				spr.texture = sand_tex
-			elif d > fort_clear:
-				spr.texture = grass_tex
-			else:
-				# Thin packed-earth apron under fort walls
-				spr.texture = sand_tex
-				spr.modulate = Color(0.85, 0.82, 0.75)
-			spr.position = center + local
-			spr.z_index = -2
-			island.add_child(spr)
 
-	# Trees on the grass/beach fringe — outside the fortress footprint
-	var tree_spots := [
-		Vector2(-150, -40), Vector2(155, -55), Vector2(-130, 110),
-		Vector2(140, 100), Vector2(-40, -165), Vector2(50, 160),
-		Vector2(-160, 50), Vector2(165, 30), Vector2(20, -150),
+	# Single soft disc: ocean → golden beach ring → greenery (under fort).
+	var base := Sprite2D.new()
+	base.texture = base_tex
+	base.position = center
+	# Texture is 512px with ~240px content radius; match ISLAND_RADIUS.
+	base.scale = Vector2.ONE * (GameConfig.ISLAND_RADIUS / 240.0)
+	base.z_index = -2
+	island.add_child(base)
+
+	# Sparse trees on the green ring — outside fortress footprint, inside beach.
+	var tree_spots: Array[Vector2] = [
+		Vector2(20, -145),
+		Vector2(160, 30),
+		Vector2(50, 150),
+		Vector2(-155, 50),
 	]
 	for offset in tree_spots:
-		if offset.length() < fort_clear + 20.0:
+		var d: float = offset.length()
+		if d < fort_clear + 25.0 or d > GameConfig.ISLAND_RADIUS * 0.72:
 			continue
 		var t := Sprite2D.new()
 		t.texture = tree_tex
 		t.position = center + offset
-		t.scale = Vector2(0.75, 0.75)
+		t.scale = Vector2(0.7, 0.7)
 		t.z_index = -1
 		island.add_child(t)

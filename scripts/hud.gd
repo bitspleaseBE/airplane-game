@@ -11,6 +11,11 @@ var _main: Node2D
 @onready var overlay: ColorRect = $Root/Overlay
 @onready var result_label: Label = $Root/Overlay/ResultLabel
 @onready var restart_button: Button = $Root/Overlay/RestartButton
+@onready var version_label: Label = $Root/VersionLabel
+
+
+func _ready() -> void:
+	version_label.text = "v%s" % ProjectSettings.get_setting("application/config/version", "?")
 
 
 func setup(main_ref: Node2D) -> void:

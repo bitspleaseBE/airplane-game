@@ -15,6 +15,8 @@ var bomb_dropped: bool = false
 var _main: Node2D
 var _smoke_timer: float = 0.0
 var _spin: float = 0.0
+var _exit_dir: Vector2 = Vector2.RIGHT
+var _exit_time: float = 0.0
 
 @onready var sprite: Sprite2D = $Sprite
 @onready var shadow: Sprite2D = $Shadow
@@ -53,14 +55,11 @@ func _fly(delta: float) -> void:
 	var dir := (target - global_position).normalized()
 	global_position += dir * speed * delta
 	rotation = dir.angle()
-	shadow.position = Vector2(10, 14).rotated(-rotation)  # keep shadow offset roughly down-right in world? local ok
 	shadow.position = Vector2(8, 10)
 
 	if not bomb_dropped and global_position.distance_to(target) <= GameConfig.PLANE_BOMB_RADIUS:
 		_drop_bomb()
-		phase = Phase.EXITING
-		# Fly past keep in same direction
-		target = global_position + dir * 600.0
+		_begin_exit(dir)
 
 
 func _drop_bomb() -> void:
@@ -69,12 +68,35 @@ func _drop_bomb() -> void:
 		_main.apply_bomb_at(global_position, GameConfig.KEEP_BOMB_DAMAGE)
 
 
+func _begin_exit(dir: Vector2) -> void:
+	phase = Phase.EXITING
+	_exit_dir = dir if dir.length_squared() > 0.001 else Vector2.RIGHT
+	_exit_time = 0.0
+
+
 func _exit(delta: float) -> void:
-	var dir := (target - global_position).normalized()
-	global_position += dir * speed * 1.15 * delta
-	rotation = dir.angle()
-	if global_position.distance_to(GameConfig.ISLAND_CENTER) > 900.0:
+	_exit_time += delta
+	global_position += _exit_dir * speed * 1.15 * delta
+	rotation = _exit_dir.angle()
+	# Leave the playfield, then despawn (distance, off-screen, or timeout safety).
+	if (
+		global_position.distance_to(GameConfig.ISLAND_CENTER) > 520.0
+		or not _is_roughly_on_screen()
+		or _exit_time > 4.0
+	):
 		_finish(true)
+
+
+func _is_roughly_on_screen() -> bool:
+	var margin := 80.0
+	var screen_pos := get_viewport().get_canvas_transform() * global_position
+	var size := get_viewport_rect().size
+	return (
+		screen_pos.x > -margin
+		and screen_pos.y > -margin
+		and screen_pos.x < size.x + margin
+		and screen_pos.y < size.y + margin
+	)
 
 
 func take_hit() -> void:
