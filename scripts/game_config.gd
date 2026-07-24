@@ -22,16 +22,25 @@ const PLANE_TYPE_TINTS := {
 	PlaneType.CARPET: Color(1.0, 0.6, 0.48),
 }
 
+## Visual silhouette only — Area2D scale stays fixed so hitboxes stay fair.
+const PLANE_TYPE_SPRITE_SCALES := {
+	PlaneType.GUNSHIP: Vector2(0.9, 0.9),
+	PlaneType.BOMBER: Vector2.ONE,
+	PlaneType.STRIKE: Vector2(0.95, 0.95),
+	PlaneType.CARPET: Vector2(1.12, 1.12),
+}
+
 const GUNSHIP_MAX_LEVEL := 5
 const BOMBER_MAX_LEVEL := 10
 const STRIKE_MAX_LEVEL := 15
 
-## Gunship (levels 1–5): strafes the fort with its nose gun on approach.
+## Gunship (levels 1–5): hunts corner AA first, strafes with its nose gun.
 const GUNSHIP_STRAFE_RANGE := 250.0
 const GUNSHIP_SHOT_COUNT := 5
 const GUNSHIP_SHOT_DAMAGE := 4  # 5 × 4 = 20, same payload as one bomb
 const GUNSHIP_SHOT_INTERVAL := 0.16
-const GUNSHIP_SHOT_JITTER := 36.0
+const GUNSHIP_SHOT_JITTER := 28.0
+const GUNSHIP_SPEED_MULT := 1.08
 
 ## Strike jet (levels 11–15): fires a guided missile from standoff, then banks away.
 ## Standoff sits deep inside AA range (360) so the run in and out is still a gamble.
@@ -41,10 +50,13 @@ const STRIKE_MISSILE_SPEED := 300.0
 const STRIKE_MISSILE_TURN_RATE := 4.5
 const STRIKE_SPEED_MULT := 1.15
 
-## Carpet bomber (levels 16–20): one plane lays 3 bombs in a line across the fort.
+## Carpet bomber (levels 16–20): one plane lays 3 bombs along the keep track.
 const CARPET_BOMB_COUNT := 3
 const CARPET_BOMB_DAMAGE := 10
 const CARPET_BOMB_INTERVAL := 0.22
+const CARPET_BOMB_SPACING := 36.0
+## Start the pass outside bomb radius so the stick centers on the keep.
+const CARPET_START_RANGE := 130.0
 const CARPET_SPEED_MULT := 0.9
 
 ## Stronghold evolution — staggered so no level introduces two new things.
@@ -74,6 +86,9 @@ const PLANE_SCALE := 0.9
 
 const TURRET_RANGE := 360.0
 const TURRET_FIRE_COOLDOWN := 1.2
+## From bastion 3 up, corner guns reach farther and cycle faster so blitz dies.
+const TURRET_RANGE_HOT := 410.0
+const TURRET_FIRE_COOLDOWN_HOT := 0.75
 const TURRET_ROTATE_SPEED := 3.5
 const BULLET_SPEED := 380.0
 const BULLET_DAMAGE := 1
@@ -94,13 +109,20 @@ const MISSILE_LIFETIME := 4.0
 const ISLAND_CENTER := Vector2(360, 640)
 const ISLAND_RADIUS := 240.0
 const ISLAND_RADIUS_MAX := 380.0
+## Milestone bastions (10 / 15 / 20) punch above the normal size curve.
+const ISLAND_RADIUS_STRONGHOLD := 460.0
 const KEEP_RADIUS := 90.0
 const FORT_CLEAR_RADIUS := 110.0
 const WATER_MIN_RADIUS := 255.0
+## Guns stay this far inside the grass line so they don't sit on the beach.
+const TOWER_INLAND_MARGIN := 52.0
 
 const ISLAND_SPACING_MIN := 1400.0
 const ISLAND_SPACING_MAX := 1800.0
 const CAMERA_PAN_DURATION := 1.2
+
+## Campaign milestones: oversized islands with denser outer defenses.
+const STRONGHOLD_LEVELS := [10, 15, 20]
 
 
 func level_t(level: int) -> float:
@@ -108,6 +130,10 @@ func level_t(level: int) -> float:
 	if LEVEL_COUNT <= 1:
 		return 0.0
 	return float(n - 1) / float(LEVEL_COUNT - 1)
+
+
+func is_stronghold_level(level: int) -> bool:
+	return clampi(level, 1, LEVEL_COUNT) in STRONGHOLD_LEVELS
 
 
 func squadron_for_level(level: int) -> int:
@@ -130,7 +156,15 @@ func plane_name_for_level(level: int) -> String:
 
 
 func island_radius_for_level(level: int) -> float:
-	return lerpf(ISLAND_RADIUS, ISLAND_RADIUS_MAX, level_t(level))
+	var n := clampi(level, 1, LEVEL_COUNT)
+	if is_stronghold_level(n):
+		# 10 / 15 / 20 step up so the finale feels like a real fortress isle.
+		if n == 10:
+			return lerpf(ISLAND_RADIUS_MAX, ISLAND_RADIUS_STRONGHOLD, 0.55)
+		if n == 15:
+			return lerpf(ISLAND_RADIUS_MAX, ISLAND_RADIUS_STRONGHOLD, 0.8)
+		return ISLAND_RADIUS_STRONGHOLD
+	return lerpf(ISLAND_RADIUS, ISLAND_RADIUS_MAX, level_t(n))
 
 
 func keep_hp_for_level(level: int) -> int:
@@ -138,26 +172,78 @@ func keep_hp_for_level(level: int) -> int:
 
 
 func turret_count_for_level(level: int) -> int:
-	# 2 → 4 across the campaign.
-	return clampi(2 + int(round(level_t(level) * 2.0)), 2, 4)
+	# L1–2 teach the loop with 2 guns; L3+ demands a third so blitz stops free-winning.
+	var n := clampi(level, 1, LEVEL_COUNT)
+	if n <= 2:
+		return 2
+	if n <= 9:
+		return 3
+	if is_stronghold_level(n):
+		return 4
+	if n <= 14:
+		return 3
+	return 4
 
 
 func tower_count_range_for_level(level: int) -> Vector2i:
-	# 1–2 early → 4–6 late.
+	# 1 early → denser late; milestone bastions pack a thick outer ring.
+	var n := clampi(level, 1, LEVEL_COUNT)
+	if is_stronghold_level(n):
+		if n == 10:
+			return Vector2i(6, 8)
+		if n == 15:
+			return Vector2i(7, 9)
+		return Vector2i(8, 10)
+	if n <= 2:
+		return Vector2i(1, 1)
+	if n <= 5:
+		return Vector2i(3, 3) if n >= 3 else Vector2i(2, 3)
+	if n >= 16:
+		return Vector2i(4, 6)
+	if n >= FLAK_TOWER_UNLOCK_LEVEL:
+		return Vector2i(3, 5)
 	var t := level_t(level)
 	var lo := clampi(1 + int(floor(t * 3.0)), 1, 4)
 	var hi := clampi(2 + int(floor(t * 4.0)), lo, 6)
 	return Vector2i(lo, hi)
 
 
-func three_star_max_used(keep_max_hp: int, gun_count: int, squadron: int) -> int:
-	var cap := ceili(float(keep_max_hp) / float(KEEP_BOMB_DAMAGE)) + 2 + int(gun_count / 2)
+func turret_range_for_level(level: int) -> float:
+	return TURRET_RANGE_HOT if clampi(level, 1, LEVEL_COUNT) >= 3 else TURRET_RANGE
+
+
+func turret_cooldown_for_level(level: int) -> float:
+	return TURRET_FIRE_COOLDOWN_HOT if clampi(level, 1, LEVEL_COUNT) >= 3 else TURRET_FIRE_COOLDOWN
+
+
+## Rough keep punch per bird — used for star thresholds across wing types.
+func expected_keep_damage_per_plane(plane_type: PlaneType) -> int:
+	match plane_type:
+		PlaneType.GUNSHIP:
+			# Most shots go into AA; expect ~half the payload on the keep.
+			return GUNSHIP_SHOT_COUNT * GUNSHIP_SHOT_DAMAGE / 2
+		PlaneType.STRIKE:
+			return STRIKE_MISSILE_DAMAGE
+		PlaneType.CARPET:
+			# Stick centered on the keep — expect ~2 of 3 on target.
+			return CARPET_BOMB_DAMAGE * 2
+		_:
+			return KEEP_BOMB_DAMAGE
+
+
+func three_star_max_used(
+	keep_max_hp: int, gun_count: int, squadron: int, level: int = 1
+) -> int:
+	var dmg := maxi(expected_keep_damage_per_plane(plane_type_for_level(level)), 1)
+	var cap := ceili(float(keep_max_hp) / float(dmg)) + 2 + int(gun_count / 2)
 	var one_star_min := squadron - 5
 	return mini(cap, one_star_min - 2)
 
 
-func stars_for_win(planes_used: int, keep_max_hp: int, gun_count: int, squadron: int) -> int:
-	var three := three_star_max_used(keep_max_hp, gun_count, squadron)
+func stars_for_win(
+	planes_used: int, keep_max_hp: int, gun_count: int, squadron: int, level: int = 1
+) -> int:
+	var three := three_star_max_used(keep_max_hp, gun_count, squadron, level)
 	var one_min := squadron - 5
 	if planes_used <= three:
 		return 3

@@ -18,6 +18,8 @@ var fire_cooldown: float = 0.0
 var _main: Node2D
 var _dead: bool = false
 var _keep_center: Vector2 = GameConfig.ISLAND_CENTER
+var _range: float = GameConfig.TURRET_RANGE
+var _cooldown: float = GameConfig.TURRET_FIRE_COOLDOWN
 ## World-space angle from this turret toward the keep (center of forbidden wedge).
 var _blocked_center: float = 0.0
 ## CCW start of the allowed arc (one edge of the keep-facing wedge).
@@ -28,8 +30,15 @@ var _arc_start: float = 0.0
 @onready var hp_bar: ProgressBar = $HpBar
 
 
-func configure(main_ref: Node2D, keep_center: Vector2 = Vector2.ZERO) -> void:
+func configure(
+	main_ref: Node2D,
+	keep_center: Vector2 = Vector2.ZERO,
+	range_override: float = -1.0,
+	cooldown_override: float = -1.0,
+) -> void:
 	_main = main_ref
+	_range = range_override if range_override > 0.0 else GameConfig.TURRET_RANGE
+	_cooldown = cooldown_override if cooldown_override > 0.0 else GameConfig.TURRET_FIRE_COOLDOWN
 	_keep_center = keep_center if keep_center != Vector2.ZERO else (
 		main_ref.active_center if main_ref and "active_center" in main_ref else GameConfig.ISLAND_CENTER
 	)
@@ -37,7 +46,8 @@ func configure(main_ref: Node2D, keep_center: Vector2 = Vector2.ZERO) -> void:
 	# Allowed arc runs CCW from (blocked + 45°) across 270° to (blocked - 45°).
 	_arc_start = _blocked_center + BLOCKED_HALF_ANGLE
 	# Face outward (away from keep) — midpoint of the allowed arc.
-	barrel.rotation = _arc_to_world(ARC_SPAN * 0.5) + BARREL_ART_OFFSET
+	if barrel:
+		barrel.rotation = _arc_to_world(ARC_SPAN * 0.5) + BARREL_ART_OFFSET
 
 
 func _ready() -> void:
@@ -67,7 +77,7 @@ func _process(delta: float) -> void:
 	var desired_world := to_plane.angle()
 	_rotate_barrel_toward(desired_world, delta)
 
-	if to_plane.length() <= GameConfig.TURRET_RANGE and fire_cooldown <= 0.0:
+	if to_plane.length() <= _range and fire_cooldown <= 0.0:
 		# Only fire when barrel is on the plane and the shot won't hit the keep.
 		if not _shot_hits_keep(plane.global_position):
 			var aim_world := _barrel_world_angle()
@@ -75,12 +85,12 @@ func _process(delta: float) -> void:
 			var clamped := _arc_to_world(_world_to_arc(desired_world))
 			if abs(angle_difference(aim_world, clamped)) < 0.4:
 				_fire(clamped)
-				fire_cooldown = GameConfig.TURRET_FIRE_COOLDOWN
+				fire_cooldown = _cooldown
 
 
 func _nearest_plane() -> PlaneUnit:
 	var best: PlaneUnit = null
-	var best_d := GameConfig.TURRET_RANGE
+	var best_d := _range
 	for child in _main.get_planes():
 		if child is PlaneUnit and child.phase == PlaneUnit.Phase.FLYING:
 			var to: Vector2 = child.global_position - global_position

@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://cu7s65ydbpuc0"
-path="res://.godot/imported/speaker_on.png-2ea41ceb5473ad41c5fe57c8a7887c78.ctex"
+uid="uid://doxcutrkwh0vw"
+path="res://.godot/imported/star_empty.png-f4fcde3d6535c35e2a80eff48a1e13b2.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/ui/speaker_on.png"
-dest_files=["res://.godot/imported/speaker_on.png-2ea41ceb5473ad41c5fe57c8a7887c78.ctex"]
+source_file="res://assets/ui/star_empty.png"
+dest_files=["res://.godot/imported/star_empty.png-f4fcde3d6535c35e2a80eff48a1e13b2.ctex"]
 
 [params]
 

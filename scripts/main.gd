@@ -35,7 +35,7 @@ const HOLD_SPAWN_INTERVAL := 0.15
 @onready var bullets: Node2D = $Bullets
 @onready var effects: Node2D = $Effects
 @onready var hud: CanvasLayer = $HUD
-@onready var ocean: ColorRect = $Ocean
+@onready var ocean: ColorRect = $Camera/Ocean
 
 var _plane_scene: PackedScene = preload("res://scenes/plane.tscn")
 var _explosion_scene: PackedScene = preload("res://scenes/explosion.tscn")
@@ -52,8 +52,9 @@ var keep: Keep:
 
 func _ready() -> void:
 	randomize()
-	_apply_open_ocean()
 	_build_campaign()
+	_apply_open_ocean()
+	_sync_map_layers_to_camera()
 	_activate_level(1, false)
 	hud.setup(self)
 	_emit_hud()
@@ -61,6 +62,7 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	_sync_map_layers_to_camera()
 	_spawn_cooldown = max(_spawn_cooldown - delta, 0.0)
 	if state != State.PLAYING or not _holding:
 		return
@@ -202,7 +204,9 @@ func _set_won() -> void:
 	_last_keep_max_hp = keep.max_hp if keep else GameConfig.KEEP_MAX_HP
 	_last_gun_count = _active_island.gun_count_initial() if _active_island else 0
 	var used := squadron_size - planes_remaining
-	last_stars = GameConfig.stars_for_win(used, _last_keep_max_hp, _last_gun_count, squadron_size)
+	last_stars = GameConfig.stars_for_win(
+		used, _last_keep_max_hp, _last_gun_count, squadron_size, current_level
+	)
 	var campaign_done := current_level >= GameConfig.LEVEL_COUNT
 	game_won.emit(last_stars, campaign_done)
 
@@ -289,6 +293,26 @@ func get_planes() -> Array:
 	return planes.get_children()
 
 
+func get_active_island() -> Island:
+	return _active_island
+
+
+func get_defense_positions() -> Array[Vector2]:
+	if _active_island:
+		return _active_island.get_defense_positions()
+	return []
+
+
+func get_gunship_target(from_pos: Vector2) -> Vector2:
+	if _active_island and _active_island.has_method("get_gunship_target"):
+		return _active_island.get_gunship_target(from_pos)
+	return active_center
+
+
+func current_plane_type() -> GameConfig.PlaneType:
+	return GameConfig.plane_type_for_level(current_level)
+
+
 func active_water_min_radius() -> float:
 	if _active_island:
 		return _active_island.get_water_min_radius()
@@ -344,20 +368,25 @@ func _layout_island_positions() -> Array[Vector2]:
 	var heading := randf() * TAU
 	for i in range(1, GameConfig.LEVEL_COUNT):
 		var placed := false
+		var level_num := i + 1  # 1-based bastion index for the island being placed
+		var spacing_min := GameConfig.ISLAND_SPACING_MIN
+		var spacing_max := GameConfig.ISLAND_SPACING_MAX
+		var level_sep := min_sep
+		if GameConfig.is_stronghold_level(level_num) or GameConfig.is_stronghold_level(i):
+			spacing_min += 220.0
+			spacing_max += 280.0
+			level_sep += 220.0
 		for attempt in 48:
-			var spacing := randf_range(
-				GameConfig.ISLAND_SPACING_MIN,
-				GameConfig.ISLAND_SPACING_MAX
-			)
+			var spacing := randf_range(spacing_min, spacing_max)
 			# Early attempts: soft turn along the chain. Later: any direction.
 			var dir: float
 			if attempt < 20:
 				dir = heading + randf_range(-0.55, 0.55)
 			else:
 				dir = randf() * TAU
-				spacing = GameConfig.ISLAND_SPACING_MIN + float(attempt) * 25.0
+				spacing = spacing_min + float(attempt) * 25.0
 			var candidate := pos + Vector2.from_angle(dir) * spacing
-			if _island_clear_of(candidate, positions, min_sep):
+			if _island_clear_of(candidate, positions, level_sep):
 				heading = (candidate - pos).angle()
 				pos = candidate
 				positions.append(candidate)
@@ -365,12 +394,12 @@ func _layout_island_positions() -> Array[Vector2]:
 				break
 		if not placed:
 			# Guaranteed unique slot on a golden-angle ring from the origin.
-			var ring := min_sep * (1.0 + float(i) * 0.95)
+			var ring := level_sep * (1.0 + float(i) * 0.95)
 			var ang := float(i) * TAU * 0.61803398875
 			var fallback := GameConfig.ISLAND_CENTER + Vector2.from_angle(ang) * ring
 			# Nudge out until clear of everything already placed.
 			var guard := 0
-			while not _island_clear_of(fallback, positions, min_sep) and guard < 30:
+			while not _island_clear_of(fallback, positions, level_sep) and guard < 30:
 				guard += 1
 				fallback = GameConfig.ISLAND_CENTER + Vector2.from_angle(ang) * (ring + float(guard) * 200.0)
 			heading = (fallback - pos).angle()
@@ -449,19 +478,25 @@ func _apply_open_ocean() -> void:
 	if ocean == null or ocean.material == null:
 		return
 	var mat := ocean.material as ShaderMaterial
-	if mat == null:
+	if mat:
+		mat.set_shader_parameter("open_ocean", true)
+
+
+func _sync_map_layers_to_camera() -> void:
+	## Ocean/clouds live under the camera in local space so they always fill the
+	## view — world-space ColorRects stop drawing at far campaign coordinates.
+	if camera == null:
 		return
-	mat.set_shader_parameter("open_ocean", true)
-	# Cover the full campaign map with margin.
-	ocean.offset_left = -8000.0
-	ocean.offset_top = -8000.0
-	ocean.offset_right = 16000.0
-	ocean.offset_bottom = 16000.0
-	var clouds := get_node_or_null("Clouds") as ColorRect
-	var shadows := get_node_or_null("CloudShadows") as ColorRect
-	for rect in [clouds, shadows]:
-		if rect:
-			rect.offset_left = -8000.0
-			rect.offset_top = -8000.0
-			rect.offset_right = 16000.0
-			rect.offset_bottom = 16000.0
+	var view_size := get_viewport().get_visible_rect().size
+	var half := view_size / (camera.zoom * 2.0)
+	# Pad for stretch/aspect expand and subpixel camera pans.
+	half += Vector2(160.0, 160.0)
+	var clouds := camera.get_node_or_null("Clouds") as ColorRect
+	var shadows := camera.get_node_or_null("CloudShadows") as ColorRect
+	for rect in [ocean, clouds, shadows]:
+		if rect == null:
+			continue
+		rect.offset_left = -half.x
+		rect.offset_top = -half.y
+		rect.offset_right = half.x
+		rect.offset_bottom = half.y

@@ -3,8 +3,10 @@ extends CanvasLayer
 ## HUD: squadron count, keep HP, level, star ratings, win/lose overlays, sound toggle.
 
 const SETTINGS_PATH := "user://settings.cfg"
-const _SPEAKER_ON: Texture2D = preload("res://assets/ui/speaker_on.png")
-const _SPEAKER_OFF: Texture2D = preload("res://assets/ui/speaker_off.png")
+const _AUDIO_ON: Texture2D = preload("res://assets/ui/audio_on.png")
+const _AUDIO_OFF: Texture2D = preload("res://assets/ui/audio_off.png")
+const _STAR_FULL: Texture2D = preload("res://assets/ui/star.png")
+const _STAR_EMPTY: Texture2D = preload("res://assets/ui/star_empty.png")
 
 ## Radio-chatter callouts when a new airframe or bastion defense comes online.
 const _UNLOCK_TOASTS := {
@@ -16,10 +18,10 @@ const _UNLOCK_TOASTS := {
 }
 
 const _WING_HINTS := {
-	GameConfig.PlaneType.GUNSHIP: "Tap the water, ace —\nscramble the gunships",
+	GameConfig.PlaneType.GUNSHIP: "Tap the water, ace —\nsoft the guns, then the keep",
 	GameConfig.PlaneType.BOMBER: "Tap the water, ace —\nscramble the bombers",
 	GameConfig.PlaneType.STRIKE: "Tap the water, ace —\nloose the strike jets",
-	GameConfig.PlaneType.CARPET: "Tap the water, ace —\nroll the carpet bombers",
+	GameConfig.PlaneType.CARPET: "Tap the water, ace —\none pass, three gifts",
 }
 
 var _main: Node2D
@@ -37,7 +39,7 @@ var _toast_tween: Tween
 @onready var toast_label: Label = $Root/ToastLabel
 @onready var hint_label: Label = $Root/HintLabel
 @onready var overlay: ColorRect = $Root/Overlay
-@onready var stars_label: Label = $Root/Overlay/StarsLabel
+@onready var stars_row: HBoxContainer = $Root/Overlay/StarsRow
 @onready var result_label: Label = $Root/Overlay/ResultLabel
 @onready var restart_button: Button = $Root/Overlay/RestartButton
 @onready var version_label: Label = $Root/VersionLabel
@@ -64,14 +66,19 @@ func setup(main_ref: Node2D) -> void:
 		_main.level_changed.connect(_on_level)
 	restart_button.pressed.connect(_on_restart)
 	overlay.visible = false
-	stars_label.visible = false
+	stars_row.visible = false
 	_on_squadron(GameConfig.squadron_for_level(1))
 	_on_keep_hp(GameConfig.KEEP_MAX_HP, GameConfig.KEEP_MAX_HP)
 	_on_level(1)
 
 
 func _on_squadron(remaining: int) -> void:
-	squadron_label.text = "Planes: %d" % remaining
+	var wing := "PLANES"
+	if _main and _main.has_method("current_plane_type"):
+		wing = GameConfig.PLANE_TYPE_NAMES[_main.current_plane_type()]
+	elif _main and "current_level" in _main:
+		wing = GameConfig.plane_name_for_level(int(_main.current_level))
+	squadron_label.text = "%s: %d" % [wing, remaining]
 
 
 func _on_keep_hp(current: int, maximum: int) -> void:
@@ -110,8 +117,8 @@ func _on_won(stars: int = 3, campaign_complete: bool = false) -> void:
 	hint_label.visible = false
 	overlay.visible = true
 	overlay.color = Color(0.05, 0.15, 0.08, 0.72)
-	stars_label.visible = true
-	stars_label.text = _star_string(stars)
+	_set_stars(stars)
+	stars_row.visible = true
 	if campaign_complete:
 		result_label.text = "ARCHIPELAGO CLEARED.\nEvery bastion is smoke and glory."
 		restart_button.text = "Run it back"
@@ -125,22 +132,24 @@ func _on_lost() -> void:
 	hint_label.visible = false
 	overlay.visible = true
 	overlay.color = Color(0.15, 0.05, 0.05, 0.72)
-	stars_label.visible = false
+	stars_row.visible = false
 	result_label.text = "Squadron's spent and that\nkeep's still smug. Unacceptable."
 	restart_button.text = "Re-engage"
 
 
-func _star_string(stars: int) -> String:
+func _set_stars(stars: int) -> void:
 	var filled := clampi(stars, 0, 3)
-	var s := ""
-	for i in 3:
-		s += "★" if i < filled else "☆"
-	return s
+	for i in stars_row.get_child_count():
+		var icon := stars_row.get_child(i) as TextureRect
+		if icon == null:
+			continue
+		icon.texture = _STAR_FULL if i < filled else _STAR_EMPTY
+		icon.modulate = Color(1, 1, 1, 1.0 if i < filled else 0.55)
 
 
 func _on_restart() -> void:
 	overlay.visible = false
-	stars_label.visible = false
+	stars_row.visible = false
 	hint_label.visible = true
 	if _main:
 		_main.advance_or_restart()
@@ -158,7 +167,7 @@ func _apply_sound() -> void:
 
 
 func _refresh_sound_button() -> void:
-	sound_button.icon = _SPEAKER_ON if _sound_on else _SPEAKER_OFF
+	sound_button.icon = _AUDIO_ON if _sound_on else _AUDIO_OFF
 	sound_button.text = ""
 	sound_button.modulate = Color(1, 1, 1, 1.0)
 	sound_button.tooltip_text = "Sound on" if _sound_on else "Sound off"

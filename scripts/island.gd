@@ -10,17 +10,31 @@ const ISLAND_LUT_SIZE := 256
 const ISLAND_IMG_SCALE := 3.0  # Half-res-ish; soft edges hide the upscale.
 const GRASS_MIN_RADIUS_BASE := 145.0
 
+## Distinct coastline silhouettes so every bastion reads differently.
+enum CoastShape {
+	ROUND,
+	BAY,
+	DOUBLE_BAY,
+	CRESCENT,
+	PENINSULA,
+	KIDNEY,
+	COVE,
+	LOBED,
+}
+
 var level: int = 1
 var island_radius: float = GameConfig.ISLAND_RADIUS
 var active: bool = false
 
 var _main: Node2D
+var _rng := RandomNumberGenerator.new()
 var _sand_lut: PackedFloat32Array = PackedFloat32Array()
 var _grass_lut: PackedFloat32Array = PackedFloat32Array()
 var _islets: Array = []
 var _tower_positions: Array[Vector2] = []
 var _turret_positions: Array[Vector2] = []
 var _grass_min_radius: float = GRASS_MIN_RADIUS_BASE
+var _coast_shape: CoastShape = CoastShape.ROUND
 
 var _keep_scene: PackedScene = preload("res://scenes/keep.tscn")
 var _turret_scene: PackedScene = preload("res://scenes/turret.tscn")
@@ -35,8 +49,13 @@ var _tower_scene: PackedScene = preload("res://scenes/tower.tscn")
 func build(level_num: int, main_ref: Node2D) -> void:
 	level = level_num
 	_main = main_ref
+	# Stable per-level seed so each bastion keeps its silhouette across retries.
+	_rng.seed = hash("bastion_%d" % level)
 	island_radius = GameConfig.island_radius_for_level(level)
 	_grass_min_radius = lerpf(120.0, 155.0, GameConfig.level_t(level))
+	if GameConfig.is_stronghold_level(level):
+		_grass_min_radius = lerpf(_grass_min_radius, 175.0, 0.7)
+	_coast_shape = _coast_shape_for_level(level)
 
 	_clear_children(land)
 	_clear_defenses(false)
@@ -57,6 +76,8 @@ func build(level_num: int, main_ref: Node2D) -> void:
 
 
 func reset_for_retry() -> void:
+	# Keep the silhouette; reshuffle only living defenses.
+	_rng.seed = hash("bastion_%d_retry" % level)
 	_clear_defenses(true)
 	_place_keep()
 	_place_turrets()
@@ -131,20 +152,57 @@ func apply_bomb_at(pos: Vector2, damage: int) -> void:
 
 ## Point damage from a gunship strafe — hits whatever sits under the impact.
 func apply_gunfire_at(pos: Vector2, damage: int) -> void:
-	if keep and is_instance_valid(keep) and keep.hp > 0:
-		if pos.distance_to(keep.global_position) <= GameConfig.KEEP_RADIUS * 0.9:
-			keep.take_damage(damage)
-			return
+	# Prefer living guns so SEAD runs actually soft the nest.
 	for turret in turrets_root.get_children():
 		if turret is Turret and is_instance_valid(turret) and not turret.is_destroyed():
-			if pos.distance_to(turret.global_position) <= 34.0:
+			if pos.distance_to(turret.global_position) <= 38.0:
 				turret.take_damage(damage)
 				return
 	for tower in towers_root.get_children():
 		if tower is Tower and is_instance_valid(tower) and not tower.is_destroyed():
-			if pos.distance_to(tower.global_position) <= 32.0:
+			if pos.distance_to(tower.global_position) <= 36.0:
 				tower.take_damage(damage)
 				return
+	if keep and is_instance_valid(keep) and keep.hp > 0:
+		if pos.distance_to(keep.global_position) <= GameConfig.KEEP_RADIUS * 0.9:
+			keep.take_damage(damage)
+
+
+## Living corner AA first (near the keep), then outer towers — gunship doctrine.
+func get_defense_positions() -> Array[Vector2]:
+	var out: Array[Vector2] = []
+	for turret in turrets_root.get_children():
+		if turret is Turret and not turret.is_destroyed():
+			out.append(turret.global_position)
+	for tower in towers_root.get_children():
+		if tower is Tower and not tower.is_destroyed():
+			out.append(tower.global_position)
+	return out
+
+
+func get_gunship_target(from_pos: Vector2) -> Vector2:
+	## Prefer living corner AA (splash the keep while softing guns). Outer towers next.
+	var best := Vector2.ZERO
+	var best_score := INF
+	var keep_pos := get_center()
+	for turret in turrets_root.get_children():
+		if turret is Turret and not turret.is_destroyed():
+			var score: float = from_pos.distance_to(turret.global_position)
+			score += keep_pos.distance_to(turret.global_position) * 0.25
+			if score < best_score:
+				best_score = score
+				best = turret.global_position
+	if best_score < INF:
+		return best
+	for tower in towers_root.get_children():
+		if tower is Tower and not tower.is_destroyed():
+			var score2: float = from_pos.distance_to(tower.global_position)
+			if score2 < best_score:
+				best_score = score2
+				best = tower.global_position
+	if best_score < INF:
+		return best
+	return keep_pos
 
 
 func _clear_children(node: Node) -> void:
@@ -185,20 +243,34 @@ func _on_keep_hp_changed(current: int, maximum: int) -> void:
 
 func _place_turrets() -> void:
 	_turret_positions.clear()
-	var count := GameConfig.turret_count_for_level(level)
-	var angles: Array[float] = []
-	# Spread evenly with jitter so they sit near keep corners.
+	var count := clampi(GameConfig.turret_count_for_level(level), 0, 4)
+	# Keep guns sit on the fort's four circular corner towers — never mid-wall.
+	# When count < 4, occupy a random subset of those fixed mounts.
+	var corner_angles: Array[float] = [
+		PI * 0.25,   # SE
+		PI * 0.75,   # SW
+		PI * 1.25,   # NW
+		PI * 1.75,   # NE
+	]
+	# Fisher–Yates so which corners stay empty varies per bastion/retry.
+	for i in range(corner_angles.size() - 1, 0, -1):
+		var j := _rng.randi_range(0, i)
+		var tmp: float = corner_angles[i]
+		corner_angles[i] = corner_angles[j]
+		corner_angles[j] = tmp
+	var dist := GameConfig.FORT_CLEAR_RADIUS * 0.95
 	for i in count:
-		angles.append(TAU * float(i) / float(count) + PI * 0.25 + randf_range(-0.12, 0.12))
-
-	for ang in angles:
-		var dist := GameConfig.FORT_CLEAR_RADIUS * 0.95 + randf_range(-6.0, 10.0)
-		var local := Vector2.from_angle(ang) * dist
+		var local := Vector2.from_angle(corner_angles[i]) * dist
 		_turret_positions.append(local)
 		var turret: Turret = _turret_scene.instantiate()
 		turrets_root.add_child(turret)
 		turret.position = local
-		turret.configure(_main, get_center())
+		turret.configure(
+			_main,
+			get_center(),
+			GameConfig.turret_range_for_level(level),
+			GameConfig.turret_cooldown_for_level(level),
+		)
 		turret.destroyed.connect(func(pos: Vector2) -> void:
 			if _main and _main.has_method("_spawn_explosion"):
 				_main._spawn_explosion(pos, 1.4, _main.Boom.BOMB)
@@ -208,28 +280,36 @@ func _place_turrets() -> void:
 func _scatter_towers() -> void:
 	_tower_positions.clear()
 	var rng_range := GameConfig.tower_count_range_for_level(level)
-	var count := randi_range(rng_range.x, rng_range.y)
+	var count := _rng.randi_range(rng_range.x, rng_range.y)
 	var center := Vector2.ZERO
 	var blocked: Array[Vector2] = _turret_positions.duplicate()
+	# Stratify angles so guns fan across the island instead of clustering.
+	var sector := TAU / float(maxi(count, 1))
+	var sector_offset := _rng.randf() * TAU
 
 	var attempts := 0
-	while _tower_positions.size() < count and attempts < 400:
+	var slot := 0
+	while _tower_positions.size() < count and attempts < 500:
 		attempts += 1
-		var theta := randf() * TAU
-		var min_d := GameConfig.FORT_CLEAR_RADIUS + 35.0
-		var max_d := _lut_at(_grass_lut, theta) - 28.0
+		var theta := sector_offset + sector * float(slot) + _rng.randf_range(-sector * 0.35, sector * 0.35)
+		slot = (slot + 1) % maxi(count, 1)
+		var min_d := GameConfig.FORT_CLEAR_RADIUS + 45.0
+		var max_d := _lut_at(_grass_lut, theta) - GameConfig.TOWER_INLAND_MARGIN
 		if max_d <= min_d:
 			continue
-		var pos := center + Vector2.from_angle(theta) * randf_range(min_d, max_d)
+		# Fan across the inland band — not stacked on the keep, not on the beach.
+		var t := _rng.randf_range(0.2, 0.92)
+		var dist := lerpf(min_d, max_d, t)
+		var pos := center + Vector2.from_angle(theta) * dist
 		var too_close := false
 		for b in blocked:
-			if pos.distance_to(b) < 70.0:
+			if pos.distance_to(b) < 72.0:
 				too_close = true
 				break
 		if too_close:
 			continue
 		for p in _tower_positions:
-			if pos.distance_to(p) < 85.0:
+			if pos.distance_to(p) < 90.0:
 				too_close = true
 				break
 		if too_close:
@@ -252,7 +332,7 @@ func _scatter_towers() -> void:
 func _pick_tower_weapon(index: int) -> Tower.Weapon:
 	if level >= GameConfig.FLAK_TOWER_UNLOCK_LEVEL and index == 0:
 		return Tower.Weapon.FLAK
-	var roll := randf()
+	var roll := _rng.randf()
 	if level >= GameConfig.FLAK_TOWER_UNLOCK_LEVEL and roll < 0.2:
 		return Tower.Weapon.FLAK
 	if level >= GameConfig.MISSILE_TOWER_UNLOCK_LEVEL and roll < 0.45:
@@ -262,27 +342,57 @@ func _pick_tower_weapon(index: int) -> Tower.Weapon:
 
 func _scatter_trees() -> void:
 	var tree_tex: Texture2D = preload("res://assets/terrain/palm_tree.png")
-	var count := randi_range(0, 5) if randf() < 0.7 else randi_range(6, 10)
 	var blocked: Array[Vector2] = _turret_positions.duplicate()
 	blocked.append_array(_tower_positions)
-
 	var placed: Array[Vector2] = []
+
+	# Longer sand shelves get denser palm lines; short beaches stay sparse.
+	var long_beach_slots: Array[float] = []
+	var beach_len_est := 0.0
+	for i in ISLAND_LUT_SIZE:
+		var theta := TAU * float(i) / float(ISLAND_LUT_SIZE)
+		var sand_r := _sand_lut[i]
+		var grass_r := _grass_lut[i]
+		var shelf := sand_r - grass_r
+		if shelf > 55.0:
+			long_beach_slots.append(theta)
+			beach_len_est += shelf
+	var base_count := _rng.randi_range(2, 6)
+	if GameConfig.is_stronghold_level(level):
+		base_count += _rng.randi_range(4, 8)
+	var beach_bonus := clampi(int(beach_len_est / 180.0), 0, 14)
+	var long_bonus := mini(long_beach_slots.size() / 18, 10)
+	var count := base_count + beach_bonus + long_bonus
+
 	var attempts := 0
-	while placed.size() < count and attempts < 300:
+	while placed.size() < count and attempts < 500:
 		attempts += 1
-		var theta := randf() * TAU
-		var d := _lut_at(_grass_lut, theta) + randf_range(-14.0, 4.0)
+		var theta: float
+		if long_beach_slots.size() > 0 and _rng.randf() < 0.7:
+			theta = long_beach_slots[_rng.randi_range(0, long_beach_slots.size() - 1)]
+			theta += _rng.randf_range(-0.04, 0.04)
+		else:
+			theta = _rng.randf() * TAU
+		var grass_r := _lut_at(_grass_lut, theta)
+		var sand_r := _lut_at(_sand_lut, theta)
+		var shelf := sand_r - grass_r
+		# Long beaches: plant palms out on the sand. Short edges: grass rim only.
+		var d: float
+		if shelf > 60.0 and _rng.randf() < 0.65:
+			d = lerpf(grass_r + 6.0, sand_r - 10.0, _rng.randf_range(0.15, 0.75))
+		else:
+			d = grass_r + _rng.randf_range(-8.0, mini(14.0, shelf * 0.3))
 		if d < GameConfig.FORT_CLEAR_RADIUS + 25.0:
 			continue
 		var pos := Vector2.from_angle(theta) * d
 		var occupied := false
 		for b in blocked:
-			if pos.distance_to(b) < 45.0:
+			if pos.distance_to(b) < 48.0:
 				occupied = true
 				break
 		if not occupied:
 			for p in placed:
-				if pos.distance_to(p) < 42.0:
+				if pos.distance_to(p) < 38.0:
 					occupied = true
 					break
 		if occupied:
@@ -291,9 +401,30 @@ func _scatter_trees() -> void:
 		var t := Sprite2D.new()
 		t.texture = tree_tex
 		t.position = pos
-		t.scale = Vector2(0.7, 0.7)
+		t.scale = Vector2(_rng.randf_range(0.62, 0.78), _rng.randf_range(0.62, 0.78))
 		t.z_index = -1
 		land.add_child(t)
+
+
+func _coast_shape_for_level(level_num: int) -> CoastShape:
+	## Cycle silhouettes; strongholds get the most dramatic coastlines.
+	if level_num == 10:
+		return CoastShape.DOUBLE_BAY
+	if level_num == 15:
+		return CoastShape.CRESCENT
+	if level_num == 20:
+		return CoastShape.LOBED
+	var order: Array[CoastShape] = [
+		CoastShape.ROUND,
+		CoastShape.BAY,
+		CoastShape.PENINSULA,
+		CoastShape.KIDNEY,
+		CoastShape.COVE,
+		CoastShape.CRESCENT,
+		CoastShape.LOBED,
+		CoastShape.DOUBLE_BAY,
+	]
+	return order[(level_num - 1) % order.size()]
 
 
 func _generate_island_shape() -> void:
@@ -303,54 +434,125 @@ func _generate_island_shape() -> void:
 	_islets.clear()
 
 	var fine := FastNoiseLite.new()
-	fine.seed = randi()
+	fine.seed = _rng.randi()
 	fine.fractal_octaves = 3
-	fine.frequency = 0.9
+	fine.frequency = 1.1
 
-	var grass_base := big_r * randf_range(0.48, 0.56)
-	var sand_base := big_r * randf_range(0.82, 0.94)
+	var grass_base := big_r * _rng.randf_range(0.48, 0.56)
+	var sand_base := big_r * _rng.randf_range(0.84, 0.94)
+	var axis := _rng.randf() * TAU
+
+	# Multiplicative silhouette first — this is what makes bays/crescents readable.
+	var profile := PackedFloat32Array()
+	profile.resize(ISLAND_LUT_SIZE)
+	var shelf_boost := PackedFloat32Array()
+	shelf_boost.resize(ISLAND_LUT_SIZE)
+	_build_coast_profile(profile, shelf_boost, axis)
 
 	var harmonics: Array = []
-	for k in [2, 3, 4, 5]:
+	for k in [2, 3, 5]:
 		harmonics.append([
 			float(k),
-			randf_range(0.015, 0.05) * big_r,
-			randf_range(0.02, 0.07) * big_r,
-			randf() * TAU,
+			_rng.randf_range(0.01, 0.03) * big_r,
+			_rng.randf_range(0.015, 0.04) * big_r,
+			_rng.randf() * TAU,
 		])
-
-	var bumps: Array = []
-	for i in randi_range(1, 3):
-		bumps.append([randf() * TAU, randf_range(0.25, 0.55), randf_range(0.10, 0.22) * big_r])
-	for i in randi_range(0, 2):
-		bumps.append([randf() * TAU, randf_range(0.20, 0.45), -randf_range(0.05, 0.11) * big_r])
 
 	for i in ISLAND_LUT_SIZE:
 		var theta := TAU * float(i) / float(ISLAND_LUT_SIZE)
 		var nx := cos(theta) * 3.0
 		var ny := sin(theta) * 3.0
-		var g := grass_base + fine.get_noise_2d(nx, ny) * 0.035 * big_r
-		var s := sand_base + fine.get_noise_2d(nx + 9.0, ny + 9.0) * 0.05 * big_r
+		var shape_m := profile[i]
+		var g := grass_base * shape_m + fine.get_noise_2d(nx, ny) * 0.03 * big_r
+		var s := sand_base * shape_m + fine.get_noise_2d(nx + 9.0, ny + 9.0) * 0.04 * big_r
 		for h in harmonics:
 			g += h[1] * sin(h[0] * theta + h[3])
 			s += h[2] * sin(h[0] * theta + h[3] + 0.7)
-		for b in bumps:
-			var d := absf(wrapf(theta - b[0], -PI, PI))
-			s += b[2] * exp(-0.5 * pow(d / b[1], 2.0))
-			g += b[2] * 0.35 * exp(-0.5 * pow(d / (b[1] * 0.8), 2.0))
-		g = clampf(g, _grass_min_radius, big_r * 0.65)
+		# Keep the fort clear, but let bays cut deep into the outer ring.
+		var g_floor := _grass_min_radius * lerpf(0.72, 0.92, shape_m)
+		g = clampf(g, g_floor, big_r * 0.72)
+		var shelf := lerpf(38.0, 110.0, shelf_boost[i]) + _rng.randf_range(-4.0, 8.0)
+		# Long beaches opposite deep bites; thin shelves inside coves.
+		if shape_m < 0.85:
+			shelf = lerpf(28.0, 48.0, shape_m)
+		s = clampf(s, g + shelf * 0.85, mini(big_r, g + shelf + 20.0))
+		# Prefer the profiled sand when the shelf boost asks for a wide beach.
+		if shelf_boost[i] > 0.55:
+			s = maxf(s, g + shelf)
 		_grass_lut[i] = g
-		_sand_lut[i] = clampf(s, g + 40.0, big_r)
+		_sand_lut[i] = mini(s, big_r)
 
-	if randf() < 0.55:
-		for i in randi_range(1, 2):
-			var ang := randf() * TAU
-			var islet_r := randf_range(10.0, 22.0)
-			var lo := _lut_at(_sand_lut, ang) + islet_r + 14.0
-			var hi := big_r - islet_r - 4.0
+	var want_islets := _coast_shape == CoastShape.LOBED or _coast_shape == CoastShape.PENINSULA or _rng.randf() < 0.4
+	if want_islets:
+		var islet_n := _rng.randi_range(1, 3) if _coast_shape == CoastShape.LOBED else _rng.randi_range(1, 2)
+		for i in islet_n:
+			var ang := axis + PI + _rng.randf_range(-1.0, 1.0)
+			if _coast_shape == CoastShape.LOBED:
+				ang = axis + TAU * float(i) / 3.0 + _rng.randf_range(-0.3, 0.3)
+			var islet_r := _rng.randf_range(14.0, 30.0)
+			var lo := _lut_at(_sand_lut, ang) + islet_r + 18.0
+			var hi := big_r - islet_r - 2.0
 			if hi <= lo:
 				continue
-			_islets.append([Vector2.from_angle(ang) * randf_range(lo, hi), islet_r])
+			_islets.append([Vector2.from_angle(ang) * _rng.randf_range(lo, hi), islet_r])
+
+
+## Writes a 0.55–1.25 radius multiplier and a 0–1 beach-width boost per LUT sample.
+func _build_coast_profile(profile: PackedFloat32Array, shelf_boost: PackedFloat32Array, axis: float) -> void:
+	for i in ISLAND_LUT_SIZE:
+		var theta := TAU * float(i) / float(ISLAND_LUT_SIZE)
+		var m := 1.0
+		var shelf := 0.35
+		match _coast_shape:
+			CoastShape.ROUND:
+				m = 1.0 + 0.06 * sin(2.0 * theta + axis)
+				shelf = 0.4 + 0.15 * sin(theta * 3.0 + axis)
+			CoastShape.BAY:
+				# Deep horseshoe bite + fat beach on the far side.
+				var d := absf(wrapf(theta - axis, -PI, PI))
+				var bite := exp(-0.5 * pow(d / 0.55, 2.0))
+				m = 1.0 - 0.38 * bite + 0.12 * exp(-0.5 * pow(wrapf(theta - axis - PI, -PI, PI) / 0.7, 2.0))
+				# Headlands flanking the mouth.
+				m += 0.14 * exp(-0.5 * pow(absf(d - 0.7) / 0.22, 2.0))
+				shelf = lerpf(0.25, 0.95, 1.0 - bite)
+			CoastShape.DOUBLE_BAY:
+				var d1 := absf(wrapf(theta - axis, -PI, PI))
+				var d2 := absf(wrapf(theta - axis - PI, -PI, PI))
+				var bite := maxf(exp(-0.5 * pow(d1 / 0.5, 2.0)), exp(-0.5 * pow(d2 / 0.5, 2.0)))
+				m = 1.0 - 0.34 * bite
+				m += 0.16 * exp(-0.5 * pow(absf(wrapf(theta - axis - PI * 0.5, -PI, PI)) / 0.35, 2.0))
+				m += 0.16 * exp(-0.5 * pow(absf(wrapf(theta - axis + PI * 0.5, -PI, PI)) / 0.35, 2.0))
+				shelf = lerpf(0.3, 0.9, 1.0 - bite)
+			CoastShape.CRESCENT:
+				var along := cos(theta - axis)
+				m = lerpf(0.62, 1.18, (along + 1.0) * 0.5)
+				# Scoop the inner arc.
+				var inner := exp(-0.5 * pow(wrapf(theta - axis - PI, -PI, PI) / 0.85, 2.0))
+				m -= 0.18 * inner
+				shelf = lerpf(0.35, 1.0, 1.0 - inner)
+			CoastShape.PENINSULA:
+				var along := cos(theta - axis)
+				m = lerpf(0.78, 1.28, pow((along + 1.0) * 0.5, 1.4))
+				shelf = lerpf(0.55, 0.85, (along + 1.0) * 0.5)
+			CoastShape.KIDNEY:
+				var along := cos(theta - axis)
+				m = lerpf(0.7, 1.15, absf(along))
+				var notch := exp(-0.5 * pow(wrapf(theta - axis - PI * 0.5, -PI, PI) / 0.45, 2.0))
+				m -= 0.22 * notch
+				shelf = lerpf(0.3, 0.85, 1.0 - notch)
+			CoastShape.COVE:
+				var d := absf(wrapf(theta - axis, -PI, PI))
+				var mouth := exp(-0.5 * pow(d / 0.32, 2.0))
+				m = 1.0 - 0.42 * mouth
+				# Pinch the entrance with two horns.
+				m += 0.2 * exp(-0.5 * pow(absf(d - 0.42) / 0.14, 2.0))
+				shelf = lerpf(0.2, 0.75, 1.0 - mouth)
+			CoastShape.LOBED:
+				var tri := 0.5 + 0.5 * cos(3.0 * (theta - axis))
+				m = lerpf(0.72, 1.22, pow(tri, 1.1))
+				shelf = lerpf(0.45, 0.9, tri)
+		profile[i] = clampf(m, 0.55, 1.3)
+		shelf_boost[i] = clampf(shelf, 0.0, 1.0)
 
 
 func _lut_at(lut: PackedFloat32Array, theta: float) -> float:

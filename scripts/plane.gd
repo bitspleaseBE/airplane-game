@@ -2,8 +2,8 @@ class_name PlaneUnit
 extends Area2D
 
 ## One aircraft of the squadron. The airframe (type) is bound to the level band:
-## GUNSHIP strafes with its nose gun, BOMBER drops one heavy bomb, STRIKE fires
-## a guided missile from standoff, CARPET lays three bombs in a line.
+## GUNSHIP hunts corner AA and strafes, BOMBER drops one heavy bomb, STRIKE fires
+## a guided missile from standoff, CARPET lays three bombs along the keep track.
 
 signal finished(delivered_bomb: bool)
 signal exploded(pos: Vector2)
@@ -20,6 +20,7 @@ var _smoke_timer: float = 0.0
 var _spin: float = 0.0
 var _exit_dir: Vector2 = Vector2.RIGHT
 var _exit_time: float = 0.0
+var _keep_pos: Vector2 = GameConfig.ISLAND_CENTER
 
 # Gunship strafing run
 var _shots_left: int = GameConfig.GUNSHIP_SHOT_COUNT
@@ -31,6 +32,7 @@ var _carpet_run: bool = false
 var _carpet_dir: Vector2 = Vector2.RIGHT
 var _bombs_left: int = GameConfig.CARPET_BOMB_COUNT
 var _bomb_timer: float = 0.0
+var _carpet_stick: int = 0
 
 @onready var sprite: Sprite2D = $Sprite
 @onready var shadow: Sprite2D = $Shadow
@@ -44,16 +46,20 @@ func setup(
 	plane_type: GameConfig.PlaneType = GameConfig.PlaneType.BOMBER,
 ) -> void:
 	global_position = spawn_pos
-	target = keep_pos
+	_keep_pos = keep_pos
 	_main = main_ref
 	type = plane_type
 	match type:
+		GameConfig.PlaneType.GUNSHIP:
+			speed = GameConfig.PLANE_SPEED * GameConfig.GUNSHIP_SPEED_MULT
 		GameConfig.PlaneType.STRIKE:
 			speed = GameConfig.PLANE_SPEED * GameConfig.STRIKE_SPEED_MULT
 		GameConfig.PlaneType.CARPET:
 			speed = GameConfig.PLANE_SPEED * GameConfig.CARPET_SPEED_MULT
-	if sprite:
-		sprite.modulate = GameConfig.PLANE_TYPE_TINTS[type]
+		_:
+			speed = GameConfig.PLANE_SPEED
+	target = _pick_target(keep_pos)
+	_apply_type_look()
 	# Sprite faces +X in Kenney pack
 	rotation = (target - global_position).angle()
 
@@ -64,8 +70,26 @@ func _ready() -> void:
 	collision_mask = 4
 	monitoring = true
 	monitorable = true
+	# Keep Area2D scale fixed so hitboxes stay fair across wing types.
 	scale = Vector2.ONE * GameConfig.PLANE_SCALE
+	_apply_type_look()
 	area_entered.connect(_on_area_entered)
+
+
+func _apply_type_look() -> void:
+	if sprite == null:
+		return
+	sprite.modulate = GameConfig.PLANE_TYPE_TINTS[type]
+	sprite.scale = GameConfig.PLANE_TYPE_SPRITE_SCALES[type]
+
+
+func _pick_target(keep_pos: Vector2) -> Vector2:
+	# Gunships soft corner AA with the first shots, then finish on the keep
+	# so SEAD doesn't starve the objective.
+	if type == GameConfig.PlaneType.GUNSHIP and _shots_left > 2:
+		if _main and _main.has_method("get_gunship_target"):
+			return _main.get_gunship_target(global_position)
+	return keep_pos
 
 
 func _physics_process(delta: float) -> void:
@@ -89,11 +113,15 @@ func _fly(delta: float) -> void:
 		_carpet_pass(delta)
 		return
 
+	if type == GameConfig.PlaneType.GUNSHIP and _shots_left > 0:
+		_retarget_gunship()
+
 	var dir := (target - global_position).normalized()
 	global_position += dir * speed * delta
 	rotation = dir.angle()
 	shadow.position = Vector2(8, 10)
 	var dist := global_position.distance_to(target)
+	var keep_dist := global_position.distance_to(_keep_pos)
 
 	match type:
 		GameConfig.PlaneType.GUNSHIP:
@@ -102,8 +130,8 @@ func _fly(delta: float) -> void:
 				if _shot_timer <= 0.0:
 					_shot_timer = GameConfig.GUNSHIP_SHOT_INTERVAL
 					_fire_gun()
-			# Fly over the fort, then peel off.
-			if dist <= GameConfig.PLANE_BOMB_RADIUS * 0.6:
+			# Magazine spent, or overflew the fort — peel off.
+			if _shots_left <= 0 or keep_dist <= GameConfig.PLANE_BOMB_RADIUS * 0.6:
 				_begin_exit(dir)
 		GameConfig.PlaneType.BOMBER:
 			if not bomb_dropped and dist <= GameConfig.PLANE_BOMB_RADIUS:
@@ -116,13 +144,21 @@ func _fly(delta: float) -> void:
 				var bank := 2.1 if randf() < 0.5 else -2.1
 				_begin_exit(dir.rotated(bank))
 		GameConfig.PlaneType.CARPET:
-			if dist <= GameConfig.PLANE_BOMB_RADIUS:
+			if keep_dist <= GameConfig.CARPET_START_RANGE:
 				_carpet_run = true
-				_carpet_dir = dir
+				_carpet_dir = (_keep_pos - global_position).normalized()
+				if _carpet_dir.length_squared() < 0.001:
+					_carpet_dir = dir
 				_bomb_timer = 0.0
+				_carpet_stick = 0
 
 
-## Straight run across the fort, laying bombs at fixed intervals.
+func _retarget_gunship() -> void:
+	## Keep hunting living guns; once the nest is quiet, swing to the keep.
+	target = _pick_target(_keep_pos)
+
+
+## Straight run across the fort; sticks land on the keep track (not random dirt).
 func _carpet_pass(delta: float) -> void:
 	global_position += _carpet_dir * speed * delta
 	rotation = _carpet_dir.angle()
@@ -131,8 +167,11 @@ func _carpet_pass(delta: float) -> void:
 		_bomb_timer = GameConfig.CARPET_BOMB_INTERVAL
 		_bombs_left -= 1
 		bomb_dropped = true
+		var along := (float(_carpet_stick) - 1.0) * GameConfig.CARPET_BOMB_SPACING
+		var blast_pos := _keep_pos - _carpet_dir * along
+		_carpet_stick += 1
 		if _main and _main.has_method("apply_bomb_at"):
-			_main.apply_bomb_at(global_position, GameConfig.CARPET_BOMB_DAMAGE)
+			_main.apply_bomb_at(blast_pos, GameConfig.CARPET_BOMB_DAMAGE)
 	if _bombs_left <= 0:
 		_begin_exit(_carpet_dir)
 
@@ -152,7 +191,7 @@ func _fire_strike_missile() -> void:
 	_missile_fired = true
 	bomb_dropped = true
 	if _main and _main.has_method("launch_strike_missile"):
-		_main.launch_strike_missile(global_position, rotation, target)
+		_main.launch_strike_missile(global_position, rotation, _keep_pos)
 
 
 func _drop_bomb() -> void:
@@ -173,11 +212,11 @@ func _exit(delta: float) -> void:
 	rotation = _exit_dir.angle()
 	# Leave the playfield, then despawn (distance, off-screen, or timeout safety).
 	if (
-		global_position.distance_to(target) > 700.0
+		global_position.distance_to(_keep_pos) > 700.0
 		or not _is_roughly_on_screen()
 		or _exit_time > 4.0
 	):
-		_finish(true)
+		_finish(bomb_dropped)
 
 
 func _is_roughly_on_screen() -> bool:
