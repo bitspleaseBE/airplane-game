@@ -6,6 +6,7 @@ Art in this folder:
 - [Smoke Particles](https://kenney.nl) — black smoke trail, explosions (CC0)
 - `keep/fort.png` — generated top-down fortress sprite for Bastion Bomber
 - `terrain/palm_tree.png` — generated top-down palm tree for Bastion Bomber
+- `ui/plane.png`, `ui/castle.png` — generated Kenney-style HUD silhouettes for Bastion Bomber
 
 Audio in this folder (`sfx/`):
 

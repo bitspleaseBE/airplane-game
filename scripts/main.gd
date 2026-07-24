@@ -480,6 +480,15 @@ func _apply_open_ocean() -> void:
 	var mat := ocean.material as ShaderMaterial
 	if mat:
 		mat.set_shader_parameter("open_ocean", true)
+		# Feed island coasts so water lightens near shores and deepens offshore.
+		var centers := PackedVector2Array()
+		var radii := PackedFloat32Array()
+		for island in _islands:
+			centers.append(island.get_center())
+			radii.append(island.get_water_min_radius())
+		mat.set_shader_parameter("island_centers", centers)
+		mat.set_shader_parameter("island_radii", radii)
+		mat.set_shader_parameter("island_count", _islands.size())
 
 
 func _sync_map_layers_to_camera() -> void:
@@ -492,8 +501,9 @@ func _sync_map_layers_to_camera() -> void:
 	# Pad for stretch/aspect expand and subpixel camera pans.
 	half += Vector2(160.0, 160.0)
 	var clouds := camera.get_node_or_null("Clouds") as ColorRect
+	var clouds_far := camera.get_node_or_null("CloudsFar") as ColorRect
 	var shadows := camera.get_node_or_null("CloudShadows") as ColorRect
-	for rect in [ocean, clouds, shadows]:
+	for rect in [ocean, clouds, clouds_far, shadows]:
 		if rect == null:
 			continue
 		rect.offset_left = -half.x

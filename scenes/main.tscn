@@ -1,4 +1,4 @@
-[gd_scene load_steps=8 format=3]
+[gd_scene load_steps=9 format=3]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1"]
 [ext_resource type="PackedScene" path="res://scenes/hud.tscn" id="4"]
@@ -19,24 +19,41 @@ shader_parameter/foam_color = Color(1, 1, 1, 1)
 [sub_resource type="ShaderMaterial" id="CloudShadowMat"]
 shader = ExtResource("6")
 shader_parameter/shadow_mode = true
-shader_parameter/coverage = 0.5
+shader_parameter/coverage = 0.64
 shader_parameter/softness = 0.18
-shader_parameter/opacity = 0.38
-shader_parameter/scroll_speed = 0.01
-shader_parameter/scroll_dir = Vector2(1, 0.28)
-shader_parameter/scale = 0.0022
-shader_parameter/noise_offset = 3.7
+shader_parameter/opacity = 0.1
+shader_parameter/scroll_speed = 0.02
+shader_parameter/scroll_dir = Vector2(1, 0.38)
+shader_parameter/scale = 0.0062
+shader_parameter/noise_offset = 0.0
+shader_parameter/morph_speed = 0.095
+shader_parameter/shadow_offset = Vector2(70, 55)
+
+[sub_resource type="ShaderMaterial" id="CloudFarMat"]
+shader = ExtResource("6")
+shader_parameter/shadow_mode = false
+shader_parameter/coverage = 0.62
+shader_parameter/softness = 0.2
+shader_parameter/opacity = 0.35
+shader_parameter/scroll_speed = 0.012
+shader_parameter/scroll_dir = Vector2(0.65, 0.18)
+shader_parameter/scale = 0.0044
+shader_parameter/noise_offset = 12.0
+shader_parameter/morph_speed = 0.07
+shader_parameter/shadow_offset = Vector2(0, 0)
 
 [sub_resource type="ShaderMaterial" id="CloudMat"]
 shader = ExtResource("6")
 shader_parameter/shadow_mode = false
-shader_parameter/coverage = 0.52
+shader_parameter/coverage = 0.64
 shader_parameter/softness = 0.16
-shader_parameter/opacity = 0.5
-shader_parameter/scroll_speed = 0.015
-shader_parameter/scroll_dir = Vector2(1, 0.4)
-shader_parameter/scale = 0.0024
+shader_parameter/opacity = 0.75
+shader_parameter/scroll_speed = 0.02
+shader_parameter/scroll_dir = Vector2(1, 0.38)
+shader_parameter/scale = 0.0062
 shader_parameter/noise_offset = 0.0
+shader_parameter/morph_speed = 0.095
+shader_parameter/shadow_offset = Vector2(0, 0)
 
 [node name="Main" type="Node2D"]
 script = ExtResource("1")
@@ -56,7 +73,6 @@ mouse_filter = 2
 color = Color(1, 1, 1, 1)
 
 [node name="CloudShadows" type="ColorRect" parent="Camera"]
-visible = false
 z_index = 4
 material = SubResource("CloudShadowMat")
 offset_left = -1200.0
@@ -66,8 +82,17 @@ offset_bottom = 1200.0
 mouse_filter = 2
 color = Color(1, 1, 1, 1)
 
+[node name="CloudsFar" type="ColorRect" parent="Camera"]
+z_index = 9
+material = SubResource("CloudFarMat")
+offset_left = -1200.0
+offset_top = -1200.0
+offset_right = 1200.0
+offset_bottom = 1200.0
+mouse_filter = 2
+color = Color(1, 1, 1, 1)
+
 [node name="Clouds" type="ColorRect" parent="Camera"]
-visible = false
 z_index = 10
 material = SubResource("CloudMat")
 offset_left = -1200.0

@@ -7,7 +7,10 @@ signal keep_destroyed
 signal keep_hp_changed(current: int, maximum: int)
 
 const ISLAND_LUT_SIZE := 256
-const ISLAND_IMG_SCALE := 3.0  # Half-res-ish; soft edges hide the upscale.
+## Coarse texture for cheap boot-time builds; the active island re-renders
+## near-native on a background thread so its beach stays crisp.
+const ISLAND_IMG_SCALE := 3.0
+const ISLAND_IMG_SCALE_ACTIVE := 1.5
 const GRASS_MIN_RADIUS_BASE := 145.0
 
 ## Distinct coastline silhouettes so every bastion reads differently.
@@ -35,6 +38,9 @@ var _tower_positions: Array[Vector2] = []
 var _turret_positions: Array[Vector2] = []
 var _grass_min_radius: float = GRASS_MIN_RADIUS_BASE
 var _coast_shape: CoastShape = CoastShape.ROUND
+var _base_sprite: Sprite2D
+var _hires_thread: Thread
+var _hires_done := false
 
 var _keep_scene: PackedScene = preload("res://scenes/keep.tscn")
 var _turret_scene: PackedScene = preload("res://scenes/turret.tscn")
@@ -61,12 +67,13 @@ func build(level_num: int, main_ref: Node2D) -> void:
 	_clear_defenses(false)
 
 	_generate_island_shape()
-	var base := Sprite2D.new()
-	base.texture = _render_island_texture()
-	base.position = Vector2.ZERO
-	base.scale = Vector2.ONE * ISLAND_IMG_SCALE
-	base.z_index = -2
-	land.add_child(base)
+	_hires_done = false
+	_base_sprite = Sprite2D.new()
+	_base_sprite.texture = ImageTexture.create_from_image(_render_island_image(ISLAND_IMG_SCALE))
+	_base_sprite.position = Vector2.ZERO
+	_base_sprite.scale = Vector2.ONE * ISLAND_IMG_SCALE
+	_base_sprite.z_index = -2
+	land.add_child(_base_sprite)
 
 	_place_keep()
 	_place_turrets()
@@ -87,6 +94,9 @@ func reset_for_retry() -> void:
 
 func set_active(on: bool) -> void:
 	active = on
+	if on and not _hires_done and _hires_thread == null:
+		_hires_thread = Thread.new()
+		_hires_thread.start(_hires_render_worker)
 	if keep:
 		keep.set_process(on)
 		if keep.hp_bar:
@@ -293,12 +303,15 @@ func _scatter_towers() -> void:
 		attempts += 1
 		var theta := sector_offset + sector * float(slot) + _rng.randf_range(-sector * 0.35, sector * 0.35)
 		slot = (slot + 1) % maxi(count, 1)
-		var min_d := GameConfig.FORT_CLEAR_RADIUS + 45.0
-		var max_d := _lut_at(_grass_lut, theta) - GameConfig.TOWER_INLAND_MARGIN
+		var min_d := GameConfig.FORT_CLEAR_RADIUS + 30.0
+		var grass_r := _lut_at(_grass_lut, theta)
+		var sand_r := _lut_at(_sand_lut, theta)
+		# Prefer inland grass; allow the upper beach edge, never near the water.
+		var max_d := maxf(grass_r - 30.0, minf(sand_r - 60.0, grass_r + 20.0))
 		if max_d <= min_d:
 			continue
-		# Fan across the inland band — not stacked on the keep, not on the beach.
-		var t := _rng.randf_range(0.2, 0.92)
+		# Fan across the band — not stacked on the keep, not on the shoreline.
+		var t := _rng.randf_range(0.2, 0.95)
 		var dist := lerpf(min_d, max_d, t)
 		var pos := center + Vector2.from_angle(theta) * dist
 		var too_close := false
@@ -357,12 +370,12 @@ func _scatter_trees() -> void:
 		if shelf > 55.0:
 			long_beach_slots.append(theta)
 			beach_len_est += shelf
-	var base_count := _rng.randi_range(2, 6)
+	# A handful of shoreline palms, a few more where beaches run long.
+	var base_count := _rng.randi_range(3, 5)
 	if GameConfig.is_stronghold_level(level):
-		base_count += _rng.randi_range(4, 8)
-	var beach_bonus := clampi(int(beach_len_est / 180.0), 0, 14)
-	var long_bonus := mini(long_beach_slots.size() / 18, 10)
-	var count := base_count + beach_bonus + long_bonus
+		base_count += _rng.randi_range(2, 4)
+	var beach_bonus := clampi(int(beach_len_est / 400.0), 0, 6)
+	var count := mini(base_count + beach_bonus, 10)
 
 	var attempts := 0
 	while placed.size() < count and attempts < 500:
@@ -381,7 +394,7 @@ func _scatter_trees() -> void:
 		if shelf > 60.0 and _rng.randf() < 0.65:
 			d = lerpf(grass_r + 6.0, sand_r - 10.0, _rng.randf_range(0.15, 0.75))
 		else:
-			d = grass_r + _rng.randf_range(-8.0, mini(14.0, shelf * 0.3))
+			d = grass_r + _rng.randf_range(-8.0, minf(14.0, shelf * 0.3))
 		if d < GameConfig.FORT_CLEAR_RADIUS + 25.0:
 			continue
 		var pos := Vector2.from_angle(theta) * d
@@ -392,7 +405,7 @@ func _scatter_trees() -> void:
 				break
 		if not occupied:
 			for p in placed:
-				if pos.distance_to(p) < 38.0:
+				if pos.distance_to(p) < 46.0:
 					occupied = true
 					break
 		if occupied:
@@ -401,7 +414,9 @@ func _scatter_trees() -> void:
 		var t := Sprite2D.new()
 		t.texture = tree_tex
 		t.position = pos
-		t.scale = Vector2(_rng.randf_range(0.62, 0.78), _rng.randf_range(0.62, 0.78))
+		var ts := _rng.randf_range(0.6, 0.82)
+		t.scale = Vector2(ts, ts)
+		t.rotation = _rng.randf() * TAU
 		t.z_index = -1
 		land.add_child(t)
 
@@ -435,8 +450,8 @@ func _generate_island_shape() -> void:
 
 	var fine := FastNoiseLite.new()
 	fine.seed = _rng.randi()
-	fine.fractal_octaves = 3
-	fine.frequency = 1.1
+	fine.fractal_octaves = 2
+	fine.frequency = 0.8
 
 	var grass_base := big_r * _rng.randf_range(0.48, 0.56)
 	var sand_base := big_r * _rng.randf_range(0.84, 0.94)
@@ -449,12 +464,15 @@ func _generate_island_shape() -> void:
 	shelf_boost.resize(ISLAND_LUT_SIZE)
 	_build_coast_profile(profile, shelf_boost, axis)
 
+	# More harmonics = erratic, organic outline; amplitude falls off with k
+	# so the wiggle stays chunky instead of jagged.
 	var harmonics: Array = []
-	for k in [2, 3, 5]:
+	for k in [2, 3, 4, 6, 7, 9]:
+		var falloff := 1.0 / (1.0 + float(k) * 0.35)
 		harmonics.append([
 			float(k),
-			_rng.randf_range(0.01, 0.03) * big_r,
-			_rng.randf_range(0.015, 0.04) * big_r,
+			_rng.randf_range(0.015, 0.05) * big_r * falloff,
+			_rng.randf_range(0.025, 0.07) * big_r * falloff,
 			_rng.randf() * TAU,
 		])
 
@@ -463,7 +481,7 @@ func _generate_island_shape() -> void:
 		var nx := cos(theta) * 3.0
 		var ny := sin(theta) * 3.0
 		var shape_m := profile[i]
-		var g := grass_base * shape_m + fine.get_noise_2d(nx, ny) * 0.03 * big_r
+		var g := grass_base * shape_m + fine.get_noise_2d(nx, ny) * 0.028 * big_r
 		var s := sand_base * shape_m + fine.get_noise_2d(nx + 9.0, ny + 9.0) * 0.04 * big_r
 		for h in harmonics:
 			g += h[1] * sin(h[0] * theta + h[3])
@@ -471,16 +489,24 @@ func _generate_island_shape() -> void:
 		# Keep the fort clear, but let bays cut deep into the outer ring.
 		var g_floor := _grass_min_radius * lerpf(0.72, 0.92, shape_m)
 		g = clampf(g, g_floor, big_r * 0.72)
-		var shelf := lerpf(38.0, 110.0, shelf_boost[i]) + _rng.randf_range(-4.0, 8.0)
+		var shelf := lerpf(38.0, 110.0, shelf_boost[i])
 		# Long beaches opposite deep bites; thin shelves inside coves.
 		if shape_m < 0.85:
 			shelf = lerpf(28.0, 48.0, shape_m)
-		s = clampf(s, g + shelf * 0.85, mini(big_r, g + shelf + 20.0))
+		# Erratic beach width so the sand ring never reads as concentric.
+		shelf += fine.get_noise_2d(nx * 1.7 + 40.0, ny * 1.7 + 40.0) * 20.0
+		s = clampf(s, g + shelf * 0.85, minf(big_r, g + shelf + 20.0))
 		# Prefer the profiled sand when the shelf boost asks for a wide beach.
 		if shelf_boost[i] > 0.55:
 			s = maxf(s, g + shelf)
 		_grass_lut[i] = g
-		_sand_lut[i] = mini(s, big_r)
+		_sand_lut[i] = minf(s, big_r)
+
+	# Kill only pixel-level wiggle; keep the chunky erratic bumps.
+	_smooth_lut(_grass_lut, 2)
+	_smooth_lut(_sand_lut, 2)
+	for i in ISLAND_LUT_SIZE:
+		_sand_lut[i] = maxf(_sand_lut[i], _grass_lut[i] + 30.0)
 
 	var want_islets := _coast_shape == CoastShape.LOBED or _coast_shape == CoastShape.PENINSULA or _rng.randf() < 0.4
 	if want_islets:
@@ -555,57 +581,111 @@ func _build_coast_profile(profile: PackedFloat32Array, shelf_boost: PackedFloat3
 		shelf_boost[i] = clampf(shelf, 0.0, 1.0)
 
 
+func _smooth_lut(lut: PackedFloat32Array, passes: int) -> void:
+	for p in passes:
+		var src := lut.duplicate()
+		for i in ISLAND_LUT_SIZE:
+			var a := src[(i - 1 + ISLAND_LUT_SIZE) % ISLAND_LUT_SIZE]
+			var b := src[i]
+			var c := src[(i + 1) % ISLAND_LUT_SIZE]
+			lut[i] = (a + b * 2.0 + c) * 0.25
+
+
 func _lut_at(lut: PackedFloat32Array, theta: float) -> float:
 	var t := fposmod(theta, TAU) / TAU * float(ISLAND_LUT_SIZE)
 	var i := int(t) % ISLAND_LUT_SIZE
 	return lerpf(lut[i], lut[(i + 1) % ISLAND_LUT_SIZE], t - float(i))
 
 
-func _render_island_texture() -> ImageTexture:
+func _hires_render_worker() -> void:
+	var img := _render_island_image(ISLAND_IMG_SCALE_ACTIVE)
+	_apply_hires_texture.call_deferred(img)
+
+
+func _apply_hires_texture(img: Image) -> void:
+	if _hires_thread:
+		_hires_thread.wait_to_finish()
+		_hires_thread = null
+	_hires_done = true
+	if _base_sprite and is_instance_valid(_base_sprite):
+		_base_sprite.texture = ImageTexture.create_from_image(img)
+		_base_sprite.scale = Vector2.ONE * ISLAND_IMG_SCALE_ACTIVE
+
+
+func _exit_tree() -> void:
+	if _hires_thread:
+		_hires_thread.wait_to_finish()
+		_hires_thread = null
+
+
+func _render_island_image(img_scale: float) -> Image:
 	var pad := 26.0
-	var size := int(ceil((island_radius + pad) * 2.0 / ISLAND_IMG_SCALE))
+	var size := int(ceil((island_radius + pad) * 2.0 / img_scale))
 	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
 	var c := size * 0.5
+	# Smooth spatial noise for sand/grass texture — per-pixel white noise reads
+	# as static at near-native res. Deterministic per level, thread-safe reads.
+	var tex_noise := FastNoiseLite.new()
+	tex_noise.seed = hash("grain_%d" % level)
+	tex_noise.frequency = 0.14
+	tex_noise.fractal_octaves = 2
 	for y in size:
 		for x in size:
-			var p := Vector2(float(x) - c + 0.5, float(y) - c + 0.5) * ISLAND_IMG_SCALE
+			var p := Vector2(float(x) - c + 0.5, float(y) - c + 0.5) * img_scale
 			var dist := p.length()
 			var theta := atan2(p.y, p.x)
 			# Bake shallow halo so open-ocean water still reads a shoreline.
-			var col := _shade_island(dist, _lut_at(_sand_lut, theta), _lut_at(_grass_lut, theta), true)
+			var col := _shade_island(p, dist, _lut_at(_sand_lut, theta), _lut_at(_grass_lut, theta), tex_noise)
 			for islet in _islets:
 				var islet_dist: float = p.distance_to(islet[0])
 				var islet_r: float = islet[1]
 				if islet_dist > islet_r + 26.0:
 					continue
 				var islet_grass := islet_r * 0.55 if islet_r > 15.0 else 0.0
-				var icol := _shade_island(islet_dist, islet_r, islet_grass, true)
+				var icol := _shade_island(p, islet_dist, islet_r, islet_grass, tex_noise)
 				if icol.a > col.a:
 					col = icol
 			if col.a > 0.004:
 				img.set_pixel(x, y, col)
-	return ImageTexture.create_from_image(img)
+	return img
 
 
-func _shade_island(dist: float, sand_r: float, grass_r: float, halo: bool) -> Color:
-	var shallow_a := 0.0
-	if halo:
-		shallow_a = (1.0 - smoothstep(sand_r - 2.0, sand_r + 18.0, dist)) * 0.35
-	var land_a := 1.0 - smoothstep(sand_r - 2.5, sand_r + 1.5, dist)
+func _shade_island(p: Vector2, dist: float, sand_r: float, grass_r: float, noise: FastNoiseLite) -> Color:
+	var shallow_a := (1.0 - smoothstep(sand_r, sand_r + 22.0, dist)) * 0.4
+	var land_a := 1.0 - smoothstep(sand_r - 2.0, sand_r + 2.0, dist)
 	if shallow_a <= 0.004 and land_a <= 0.004:
 		return Color(0, 0, 0, 0)
-	var out := Color(0.45, 0.78, 0.76, shallow_a)
+	# Shallow water: brighter turquoise hugging the shore, fading seaward.
+	var near := 1.0 - smoothstep(sand_r, sand_r + 22.0, dist)
+	var out := Color(0.45, 0.78, 0.76).lerp(Color(0.62, 0.88, 0.84), near * 0.6)
+	out.a = shallow_a
+	# Foam band hugging the waterline — width undulates so it reads as surf.
+	var foam_w := 12.0 + noise.get_noise_2d(p.x * 0.22 + 400.0, p.y * 0.22) * 6.0
+	var foam := (1.0 - smoothstep(0.0, foam_w, absf(dist - (sand_r + 1.0)))) * 0.85
+	if foam > 0.01:
+		out = Color(
+			lerpf(out.r, 0.98, foam),
+			lerpf(out.g, 0.99, foam),
+			lerpf(out.b, 0.96, foam),
+			maxf(out.a, foam * 0.9),
+		)
 	if land_a > 0.004:
 		var dry := Color(0.94, 0.85, 0.60)
-		var wet_sand := Color(0.62, 0.52, 0.36)
-		var wet := smoothstep(sand_r - 28.0, sand_r + 0.5, dist)
-		var col := dry.lerp(wet_sand, wet * wet)
-		var grain := randf_range(-0.045, 0.045)
+		var wet_sand := Color(0.66, 0.56, 0.40)
+		# Wave-washed wet band, patchy around the coast: some stretches soaked,
+		# others nearly dry, so the dark edge never reads as a uniform ring.
+		var wave := noise.get_noise_2d(p.x * 0.18 + 250.0, p.y * 0.18) * 9.0
+		var wet_mod := clampf(0.5 + noise.get_noise_2d(p.x * 0.04 + 700.0, p.y * 0.04) * 1.1, 0.12, 1.0)
+		var wet := smoothstep(sand_r - 46.0 + wave, sand_r - 4.0, dist)
+		var col := dry.lerp(wet_sand, wet * wet * wet_mod)
+		var grain := noise.get_noise_2d(p.x, p.y) * 0.035
 		col = Color(col.r + grain, col.g + grain * 0.85, col.b + grain * 0.65)
 		if grass_r > 0.0:
 			var g := 1.0 - smoothstep(grass_r - 10.0, grass_r + 10.0, dist)
 			var glow := clampf(1.0 - dist / maxf(grass_r * 0.9, 1.0), 0.0, 1.0) * 0.55
 			var grass_col := Color(0.34, 0.60, 0.26).lerp(Color(0.55, 0.72, 0.38), glow)
+			var patch := noise.get_noise_2d(p.x * 0.3 + 900.0, p.y * 0.3) * 0.03
+			grass_col = Color(grass_col.r + patch, grass_col.g + patch, grass_col.b + patch * 0.6)
 			var rim := (1.0 - smoothstep(0.0, 12.0, absf(dist - (grass_r - 6.0)))) * 0.1
 			col = col.lerp(grass_col.darkened(rim), g)
 		out = Color(
@@ -614,5 +694,4 @@ func _shade_island(dist: float, sand_r: float, grass_r: float, halo: bool) -> Co
 			lerpf(out.b, col.b, land_a),
 			land_a + out.a * (1.0 - land_a),
 		)
-	var n := randf_range(-0.02, 0.02)
-	return Color(out.r + n, out.g + n, out.b + n, out.a)
+	return out

@@ -1,9 +1,11 @@
-[gd_scene load_steps=8 format=3]
+[gd_scene load_steps=10 format=3]
 
 [ext_resource type="Script" path="res://scripts/hud.gd" id="1"]
 [ext_resource type="Texture2D" path="res://assets/ui/audio_on.png" id="2"]
 [ext_resource type="Texture2D" path="res://assets/ui/star.png" id="3"]
 [ext_resource type="Texture2D" path="res://assets/ui/star_empty.png" id="4"]
+[ext_resource type="Texture2D" path="res://assets/ui/plane.png" id="5"]
+[ext_resource type="Texture2D" path="res://assets/ui/castle.png" id="6"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_bar_bg"]
 bg_color = Color(0.12, 0.14, 0.16, 0.85)
@@ -87,18 +89,35 @@ grow_horizontal = 2
 mouse_filter = 2
 theme_override_constants/separation = 16
 
-[node name="SquadronLabel" type="Label" parent="Root/TopBar"]
+[node name="SquadronRow" type="HBoxContainer" parent="Root/TopBar"]
 layout_mode = 2
 size_flags_horizontal = 3
+size_flags_vertical = 4
+theme_override_constants/separation = 8
+
+[node name="PlaneIcon" type="TextureRect" parent="Root/TopBar/SquadronRow"]
+custom_minimum_size = Vector2(36, 36)
+layout_mode = 2
+size_flags_vertical = 4
+texture = ExtResource("5")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="SquadronLabel" type="Label" parent="Root/TopBar/SquadronRow"]
+layout_mode = 2
+size_flags_vertical = 4
 theme_override_colors/font_color = Color(0.95, 0.96, 0.92, 1)
 theme_override_font_sizes/font_size = 28
-text = "Planes: 15"
+text = "15"
+vertical_alignment = 1
 
-[node name="KeepLabel" type="Label" parent="Root/TopBar"]
+[node name="CastleIcon" type="TextureRect" parent="Root/TopBar"]
+custom_minimum_size = Vector2(32, 32)
 layout_mode = 2
-theme_override_colors/font_color = Color(0.95, 0.96, 0.92, 1)
-theme_override_font_sizes/font_size = 22
-text = "Keep"
+size_flags_vertical = 4
+texture = ExtResource("6")
+expand_mode = 1
+stretch_mode = 5
 
 [node name="KeepBar" type="ProgressBar" parent="Root/TopBar"]
 custom_minimum_size = Vector2(160, 22)

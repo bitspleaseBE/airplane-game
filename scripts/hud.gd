@@ -30,8 +30,7 @@ var _campaign_complete: bool = false
 var _last_level: int = 0
 var _toast_tween: Tween
 
-@onready var squadron_label: Label = $Root/TopBar/SquadronLabel
-@onready var keep_label: Label = $Root/TopBar/KeepLabel
+@onready var squadron_label: Label = $Root/TopBar/SquadronRow/SquadronLabel
 @onready var keep_bar: ProgressBar = $Root/TopBar/KeepBar
 @onready var sound_button: Button = $Root/TopBar/SoundButton
 @onready var level_label: Label = $Root/LevelLabel
@@ -73,16 +72,10 @@ func setup(main_ref: Node2D) -> void:
 
 
 func _on_squadron(remaining: int) -> void:
-	var wing := "PLANES"
-	if _main and _main.has_method("current_plane_type"):
-		wing = GameConfig.PLANE_TYPE_NAMES[_main.current_plane_type()]
-	elif _main and "current_level" in _main:
-		wing = GameConfig.plane_name_for_level(int(_main.current_level))
-	squadron_label.text = "%s: %d" % [wing, remaining]
+	squadron_label.text = str(remaining)
 
 
 func _on_keep_hp(current: int, maximum: int) -> void:
-	keep_label.text = "Keep"
 	keep_bar.max_value = maximum
 	keep_bar.value = current
 

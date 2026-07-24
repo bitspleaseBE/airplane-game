@@ -9,6 +9,12 @@ uniform vec2 island_center = vec2(360.0, 640.0);
 uniform float island_radius = 300.0;
 uniform sampler2D radius_lut : filter_linear, repeat_enable;
 
+// Campaign islands: water shades from bright shallows near any coast to deep
+// open sea between islands.
+uniform int island_count = 0;
+uniform vec2 island_centers[20];
+uniform float island_radii[20];
+
 uniform vec4 deep_color : source_color = vec4(0.12, 0.40, 0.68, 1.0);
 uniform vec4 ocean_color : source_color = vec4(0.22, 0.56, 0.80, 1.0);
 uniform vec4 lagoon_color : source_color = vec4(0.34, 0.72, 0.80, 1.0);
@@ -57,9 +63,20 @@ void fragment() {
 	vec3 base;
 
 	if (open_ocean) {
-		// Soft open-water depth from low-frequency noise — no single-island coast.
+		// Distance to the nearest island coast drives the depth ramp:
+		// bright lagoon water hugging shores, deep blue in open sea.
+		float shore_d = 1e6;
+		for (int i = 0; i < island_count; i++) {
+			shore_d = min(shore_d, length(world_pos - island_centers[i]) - island_radii[i]);
+		}
+		shore_d = max(shore_d, 0.0);
+		float prox = 1.0 - smoothstep(0.0, 620.0, shore_d);
+
 		float depth_n = fbm(world_pos * 0.0012 + vec2(2.1, 7.3));
-		float d = mix(40.0, 280.0, depth_n);
+		float d_far = mix(100.0, 300.0, depth_n);
+		float d_near = mix(15.0, 85.0, depth_n);
+		float d = mix(d_far, d_near, prox);
+
 		base = shallows_color.rgb;
 		base = mix(base, lagoon_color.rgb, smoothstep(20.0, 70.0, d));
 		base = mix(base, ocean_color.rgb, smoothstep(60.0, 140.0, d));
