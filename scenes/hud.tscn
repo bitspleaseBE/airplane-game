@@ -138,6 +138,21 @@ theme_override_font_sizes/font_size = 34
 text = "BASTION BOMBER"
 horizontal_alignment = 1
 
+[node name="LevelLabel" type="Label" parent="Root"]
+layout_mode = 1
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -160.0
+offset_top = 140.0
+offset_right = 160.0
+offset_bottom = 172.0
+grow_horizontal = 2
+theme_override_colors/font_color = Color(0.92, 0.94, 0.9, 0.85)
+theme_override_font_sizes/font_size = 20
+text = "Bastion 1 / 20"
+horizontal_alignment = 1
+
 [node name="HintLabel" type="Label" parent="Root"]
 layout_mode = 1
 anchors_preset = 7
@@ -182,6 +197,26 @@ grow_horizontal = 2
 grow_vertical = 2
 color = Color(0.05, 0.08, 0.1, 0.72)
 
+[node name="StarsLabel" type="Label" parent="Root/Overlay"]
+visible = false
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -160.0
+offset_top = -180.0
+offset_right = 160.0
+offset_bottom = -120.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_colors/font_color = Color(1, 0.88, 0.35, 1)
+theme_override_font_sizes/font_size = 48
+text = "★★★"
+horizontal_alignment = 1
+vertical_alignment = 1
+
 [node name="ResultLabel" type="Label" parent="Root/Overlay"]
 layout_mode = 1
 anchors_preset = 8
@@ -190,9 +225,9 @@ anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
 offset_left = -260.0
-offset_top = -120.0
+offset_top = -110.0
 offset_right = 260.0
-offset_bottom = 20.0
+offset_bottom = 30.0
 grow_horizontal = 2
 grow_vertical = 2
 theme_override_colors/font_color = Color(1, 1, 1, 1)
@@ -208,10 +243,10 @@ anchor_left = 0.5
 anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
-offset_left = -90.0
-offset_top = 48.0
-offset_right = 90.0
-offset_bottom = 108.0
+offset_left = -110.0
+offset_top = 56.0
+offset_right = 110.0
+offset_bottom = 116.0
 grow_horizontal = 2
 grow_vertical = 2
 theme_override_colors/font_color = Color(0.15, 0.12, 0.05, 1)

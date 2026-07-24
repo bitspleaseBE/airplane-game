@@ -16,6 +16,7 @@ var hp: int = GameConfig.TURRET_MAX_HP
 var fire_cooldown: float = 0.0
 var _main: Node2D
 var _dead: bool = false
+var _keep_center: Vector2 = GameConfig.ISLAND_CENTER
 ## World-space angle from this turret toward the keep (center of forbidden wedge).
 var _blocked_center: float = 0.0
 ## CCW start of the allowed arc (one edge of the keep-facing wedge).
@@ -26,9 +27,12 @@ var _arc_start: float = 0.0
 @onready var hp_bar: ProgressBar = $HpBar
 
 
-func configure(main_ref: Node2D) -> void:
+func configure(main_ref: Node2D, keep_center: Vector2 = Vector2.ZERO) -> void:
 	_main = main_ref
-	_blocked_center = (GameConfig.ISLAND_CENTER - global_position).angle()
+	_keep_center = keep_center if keep_center != Vector2.ZERO else (
+		main_ref.active_center if main_ref and "active_center" in main_ref else GameConfig.ISLAND_CENTER
+	)
+	_blocked_center = (_keep_center - global_position).angle()
 	# Allowed arc runs CCW from (blocked + 45°) across 270° to (blocked - 45°).
 	_arc_start = _blocked_center + BLOCKED_HALF_ANGLE
 	# Face outward (away from keep) — midpoint of the allowed arc.
@@ -100,7 +104,7 @@ func _angle_deep_in_wedge(world_angle: float) -> bool:
 func _shot_hits_keep(target_pos: Vector2) -> bool:
 	var a := global_position
 	var b := target_pos
-	var c := GameConfig.ISLAND_CENTER
+	var c := _keep_center
 	var r := GameConfig.KEEP_RADIUS * 0.75
 	var ab := b - a
 	var ab_len_sq := ab.length_squared()
@@ -172,6 +176,16 @@ func _die() -> void:
 
 func is_destroyed() -> bool:
 	return _dead
+
+
+func reset() -> void:
+	_dead = false
+	hp = max_hp
+	visible = true
+	set_process(true)
+	if barrel:
+		barrel.modulate = Color.WHITE
+	_update_hp_bar()
 
 
 func _update_hp_bar() -> void:

@@ -80,7 +80,7 @@ func _exit(delta: float) -> void:
 	rotation = _exit_dir.angle()
 	# Leave the playfield, then despawn (distance, off-screen, or timeout safety).
 	if (
-		global_position.distance_to(GameConfig.ISLAND_CENTER) > 700.0
+		global_position.distance_to(target) > 700.0
 		or not _is_roughly_on_screen()
 		or _exit_time > 4.0
 	):

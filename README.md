@@ -12,7 +12,7 @@ godot --path .
 
 Or open this folder in the Godot 4.7 editor and press Play.
 
-**Controls:** tap / click the blue water around the island to spawn a bomber. You have a fixed squadron of 15. Destroy the central keep to win; spend the squadron with the keep still standing and you lose.
+**Controls:** tap / click the blue water around the island to spawn a bomber. Each bastion has a fixed squadron (40 on level 1, growing as you advance). Destroy the central keep to win; spend the squadron with the keep still standing and you lose. Beat a bastion to pan to the next of 20 islands.
 
 ## Automated playtest
 
@@ -83,11 +83,12 @@ One-time setup:
 
 Orientation is locked to portrait in the preset.
 
-## Balance (PoC)
+## Balance (campaign)
 
-- Squadron: 15 bombers
-- Keep HP: 100 (bomb = 20)
-- Turrets: 4 corners, HP 40 each, optional targets
+- Levels: 20 procedural islands in one ocean; camera pans between them
+- Squadron: 40 + 3×(level−1) bombers per bastion
+- Keep HP: 100 + 4×(level−1); corner AA and outer towers scale up
+- Stars on win: 3 = lean run, 1 = used all but 5 planes, 2 = in between
 - One bullet downs a plane (sizzle-down, no bomb)
 
 ## License

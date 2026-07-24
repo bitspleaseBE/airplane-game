@@ -1,8 +1,10 @@
 shader_type canvas_item;
 render_mode blend_mix, unshaded;
 
-/// Clean beach ocean: depth + foam only. No surface stripe noise.
+/// Open ocean with optional single-island foam LUT (legacy).
+/// When open_ocean is true, only depth/variation — shores are baked into island sprites.
 
+uniform bool open_ocean = true;
 uniform vec2 island_center = vec2(360.0, 640.0);
 uniform float island_radius = 300.0;
 uniform sampler2D radius_lut : filter_linear, repeat_enable;
@@ -52,40 +54,54 @@ float lut_radius(float theta) {
 }
 
 void fragment() {
-	vec2 delta = world_pos - island_center;
-	float dist = length(delta);
-	float theta = atan(delta.y, delta.x);
-	float shore_r = lut_radius(theta);
-	float d = dist - shore_r;
+	vec3 base;
 
-	vec3 base = shallows_color.rgb;
-	base = mix(base, lagoon_color.rgb, smoothstep(4.0, 26.0, d));
-	base = mix(base, ocean_color.rgb, smoothstep(28.0, 105.0, d));
-	base = mix(base, deep_color.rgb, smoothstep(115.0, 340.0, d));
+	if (open_ocean) {
+		// Soft open-water depth from low-frequency noise — no single-island coast.
+		float depth_n = fbm(world_pos * 0.0012 + vec2(2.1, 7.3));
+		float d = mix(40.0, 280.0, depth_n);
+		base = shallows_color.rgb;
+		base = mix(base, lagoon_color.rgb, smoothstep(20.0, 70.0, d));
+		base = mix(base, ocean_color.rgb, smoothstep(60.0, 140.0, d));
+		base = mix(base, deep_color.rgb, smoothstep(130.0, 260.0, d));
 
-	float over_sand = (1.0 - smoothstep(0.0, 14.0, d)) * step(0.0, d);
-	base = mix(base, vec3(0.58, 0.68, 0.48), over_sand * 0.35);
+		float blot = fbm(world_pos * 0.0035 + TIME * 0.008) - 0.5;
+		base *= 1.0 + blot * 0.045;
 
-	// Very soft blotches — amplitude tiny, rotated fbm so no preferred axis.
-	float blot = fbm(world_pos * 0.0035 + TIME * 0.008) - 0.5;
-	base *= 1.0 + blot * 0.045 * smoothstep(50.0, 100.0, d);
+		float swell = sin(world_pos.x * 0.008 + world_pos.y * 0.006 - TIME * 0.7);
+		base += swell * 0.015;
+	} else {
+		vec2 delta = world_pos - island_center;
+		float dist = length(delta);
+		float theta = atan(delta.y, delta.x);
+		float shore_r = lut_radius(theta);
+		float d = dist - shore_r;
 
-	// Gentle shore swell (follows coast).
-	float cn = fbm(vec2(theta * 2.0, TIME * 0.15)) * 6.0;
-	float swell = sin((d + cn) * 0.04 - TIME * 1.0);
-	base += swell * 0.02 * smoothstep(20.0, 50.0, d) * (1.0 - smoothstep(120.0, 180.0, d));
+		base = shallows_color.rgb;
+		base = mix(base, lagoon_color.rgb, smoothstep(4.0, 26.0, d));
+		base = mix(base, ocean_color.rgb, smoothstep(28.0, 105.0, d));
+		base = mix(base, deep_color.rgb, smoothstep(115.0, 340.0, d));
 
-	// Surf foam.
-	float pulse = 0.5 + 0.5 * sin(TIME * 2.2 + theta * 3.0);
-	float foam = (1.0 - smoothstep(1.5, 10.0 + pulse * 3.5, d)) * smoothstep(0.5, 2.5, d);
-	float patches = smoothstep(0.25, 0.7, fbm(vec2(theta * 6.0, TIME * 0.4)));
-	foam *= mix(0.3, 1.0, patches) * (0.55 + 0.45 * pulse);
-	base = mix(base, foam_color.rgb, clamp(foam, 0.0, 1.0));
+		float over_sand = (1.0 - smoothstep(0.0, 14.0, d)) * step(0.0, d);
+		base = mix(base, vec3(0.58, 0.68, 0.48), over_sand * 0.35);
 
-	float under = 1.0 - smoothstep(-2.0, 1.0, d);
-	base = mix(base, shallows_color.rgb * 0.9, under);
+		float blot = fbm(world_pos * 0.0035 + TIME * 0.008) - 0.5;
+		base *= 1.0 + blot * 0.045 * smoothstep(50.0, 100.0, d);
 
-	// Tiny IGN to break flat gradient banding (invisible at normal viewing).
+		float cn = fbm(vec2(theta * 2.0, TIME * 0.15)) * 6.0;
+		float swell = sin((d + cn) * 0.04 - TIME * 1.0);
+		base += swell * 0.02 * smoothstep(20.0, 50.0, d) * (1.0 - smoothstep(120.0, 180.0, d));
+
+		float pulse = 0.5 + 0.5 * sin(TIME * 2.2 + theta * 3.0);
+		float foam = (1.0 - smoothstep(1.5, 10.0 + pulse * 3.5, d)) * smoothstep(0.5, 2.5, d);
+		float patches = smoothstep(0.25, 0.7, fbm(vec2(theta * 6.0, TIME * 0.4)));
+		foam *= mix(0.3, 1.0, patches) * (0.55 + 0.45 * pulse);
+		base = mix(base, foam_color.rgb, clamp(foam, 0.0, 1.0));
+
+		float under = 1.0 - smoothstep(-2.0, 1.0, d);
+		base = mix(base, shallows_color.rgb * 0.9, under);
+	}
+
 	float ign = fract(52.9829189 * fract(dot(floor(world_pos), vec2(0.06711056, 0.00583715))));
 	base += (ign - 0.5) * (1.5 / 255.0);
 

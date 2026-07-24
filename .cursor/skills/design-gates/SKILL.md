@@ -41,12 +41,14 @@ needs two new things, split it into two levels.
 
 ## Gate 3 — Duration (auto-tested)
 
-A full game is **2–5 minutes**; rather too short than too long. A single
-level's winning run should land around **30–90 seconds**.
+A single level's winning run should land around **30–90 seconds**. The full
+20-island campaign is longer than the old 2–5 minute PoC target — judge total
+time by summing winning-level runs, and cut or shorten levels if the campaign
+drags past ~15–20 minutes of active play.
 
 - Check `elapsed_s` in each `summary.json` from `tools/balance_check.sh`.
 - `result: "timeout"` at the 300 s cap means the level cannot resolve — automatic fail.
-- If total campaign time (sum of winning-level runs) exceeds 5 minutes, cut or shorten levels.
+- Prefer short, punchy sieges over padding.
 
 ## Gate 4 — Tone of voice (review)
 

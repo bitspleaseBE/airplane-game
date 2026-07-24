@@ -19,6 +19,7 @@ const WAVE_SIZE := 5
 
 var _out_dir := "playtest/latest"
 var _planes_to_spawn := 6
+var _planes_all := false
 var _duration := 25.0
 var _shot_interval := 3.0
 var _strategy := "spread"
@@ -46,7 +47,11 @@ func _ready() -> void:
 			_out_dir = arg.trim_prefix("--out=")
 		elif arg.begins_with("--planes="):
 			var v := arg.trim_prefix("--planes=")
-			_planes_to_spawn = GameConfig.SQUADRON_SIZE if v == "all" else int(v)
+			if v == "all":
+				_planes_all = true
+				_planes_to_spawn = GameConfig.SQUADRON_SIZE
+			else:
+				_planes_to_spawn = int(v)
 		elif arg.begins_with("--duration="):
 			_duration = float(arg.trim_prefix("--duration="))
 		elif arg.begins_with("--shot-interval="):
@@ -81,11 +86,16 @@ func _run() -> void:
 	await get_tree().process_frame
 	_main = get_tree().current_scene
 
+	# Campaign _ready finishes before current_scene is assigned.
+	await get_tree().process_frame
+
 	if _main.has_signal("game_won"):
-		_main.game_won.connect(func() -> void: _result = "won")
+		_main.game_won.connect(func(_stars: int = 0, _done: bool = false) -> void: _result = "won")
 		_main.game_lost.connect(func() -> void: _result = "lost")
-	if _level > 1 and _main.has_method("set_level"):
+	if _main.has_method("set_level"):
 		_main.set_level(_level)
+	if _planes_all and "squadron_size" in _main:
+		_planes_to_spawn = int(_main.squadron_size)
 
 	await _screenshot("start")
 
@@ -121,8 +131,14 @@ func _deploy_bomber(i: int) -> bool:
 		_deployed = _planes_to_spawn
 		return false
 
-	var radius := GameConfig.WATER_MIN_RADIUS + randf_range(15.0, 55.0)
-	var world := GameConfig.ISLAND_CENTER + Vector2.from_angle(_deploy_angle(i)) * radius
+	var center: Vector2 = (
+		_main.active_center if "active_center" in _main else GameConfig.ISLAND_CENTER
+	)
+	var water_min := GameConfig.WATER_MIN_RADIUS
+	if _main.has_method("active_water_min_radius"):
+		water_min = _main.active_water_min_radius()
+	var radius := water_min + randf_range(15.0, 55.0)
+	var world := center + Vector2.from_angle(_deploy_angle(i)) * radius
 
 	# Property may be missing if main.gd currently fails to parse; stay quiet.
 	var before: int = _main.planes_remaining if "planes_remaining" in _main else -1

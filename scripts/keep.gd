@@ -23,6 +23,26 @@ func _ready() -> void:
 	hp_changed.emit(hp, max_hp)
 
 
+func configure(hp_max: int) -> void:
+	max_hp = hp_max
+	hp = max_hp
+	_dead = false
+	visible = true
+	set_process(true)
+	_update_hp_bar()
+	hp_changed.emit(hp, max_hp)
+
+
+func reset() -> void:
+	_dead = false
+	hp = max_hp
+	visible = true
+	if visual:
+		visual.modulate = Color.WHITE
+	_update_hp_bar()
+	hp_changed.emit(hp, max_hp)
+
+
 func take_damage(amount: int) -> void:
 	if _dead:
 		return

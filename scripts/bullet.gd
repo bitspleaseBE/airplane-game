@@ -5,10 +5,12 @@ extends Area2D
 
 var velocity: Vector2 = Vector2.ZERO
 var lifetime: float = 2.0
+var _origin: Vector2 = Vector2.ZERO
 
 
 func setup(pos: Vector2, angle: float) -> void:
 	global_position = pos
+	_origin = pos
 	rotation = angle
 	velocity = Vector2.RIGHT.rotated(angle) * GameConfig.BULLET_SPEED
 
@@ -25,8 +27,8 @@ func _physics_process(delta: float) -> void:
 	lifetime -= delta
 	if lifetime <= 0.0:
 		queue_free()
-	# Despawn far from island
-	if global_position.distance_to(GameConfig.ISLAND_CENTER) > 900.0:
+	# Despawn far from muzzle / island
+	if global_position.distance_to(_origin) > 900.0:
 		queue_free()
 
 

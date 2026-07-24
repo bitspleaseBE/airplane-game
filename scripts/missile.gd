@@ -7,11 +7,13 @@ var velocity: Vector2 = Vector2.ZERO
 var lifetime: float = GameConfig.MISSILE_LIFETIME
 var _target: PlaneUnit
 var _main: Node2D
+var _origin: Vector2 = Vector2.ZERO
 var _smoke_timer: float = 0.0
 
 
 func setup(pos: Vector2, angle: float, target: PlaneUnit, main_ref: Node2D) -> void:
 	global_position = pos
+	_origin = pos
 	rotation = angle
 	velocity = Vector2.RIGHT.rotated(angle) * GameConfig.MISSILE_SPEED
 	_target = target
@@ -45,7 +47,7 @@ func _physics_process(delta: float) -> void:
 	if lifetime <= 0.0:
 		_impact(false)
 		return
-	if global_position.distance_to(GameConfig.ISLAND_CENTER) > 1000.0:
+	if global_position.distance_to(_origin) > 1000.0:
 		queue_free()
 
 
