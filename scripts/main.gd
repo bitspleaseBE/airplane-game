@@ -39,7 +39,6 @@ var _plane_scene: PackedScene = preload("res://scenes/plane.tscn")
 var _explosion_scene: PackedScene = preload("res://scenes/explosion.tscn")
 var _island_scene: PackedScene = preload("res://scenes/island.tscn")
 var _strike_missile_scene: PackedScene = preload("res://scenes/strike_missile.tscn")
-var _falling_bomb_scene: PackedScene = preload("res://scenes/falling_bomb.tscn")
 
 enum Boom { BOMB, CRASH, BIG }
 
@@ -53,6 +52,7 @@ func _ready() -> void:
 	randomize()
 	_build_campaign()
 	_apply_open_ocean()
+	_apply_clouds_enabled()
 	_sync_map_layers_to_camera()
 	_activate_level(1, false)
 	hud.setup(self)
@@ -255,8 +255,7 @@ func _set_lost() -> void:
 
 
 func apply_bomb_at(pos: Vector2, damage: int) -> void:
-	# Punchier blast so bomb hits read clearly vs. grey smoke puffs.
-	_spawn_explosion(pos, 1.65, Boom.BOMB)
+	_spawn_explosion(pos, 1.0, Boom.BOMB)
 	if _active_island:
 		_active_island.apply_bomb_at(pos, damage)
 
@@ -273,14 +272,6 @@ func launch_strike_missile(pos: Vector2, angle: float, target_pos: Vector2) -> v
 	var missile: StrikeMissile = _strike_missile_scene.instantiate()
 	bullets.add_child(missile)
 	missile.setup(pos, angle, target_pos, self)
-	_pending_ordnance += 1
-
-
-func launch_bomb(from_pos: Vector2, target_pos: Vector2, damage: int) -> void:
-	var bomb: Node2D = _falling_bomb_scene.instantiate()
-	effects.add_child(bomb)
-	if bomb.has_method("setup"):
-		bomb.setup(from_pos, target_pos, damage, self)
 	_pending_ordnance += 1
 
 
@@ -538,6 +529,14 @@ func _apply_open_ocean() -> void:
 		mat.set_shader_parameter("island_centers", centers)
 		mat.set_shader_parameter("island_radii", radii)
 		mat.set_shader_parameter("island_count", _islands.size())
+
+
+func _apply_clouds_enabled() -> void:
+	## Keeps Clouds / CloudsFar / CloudShadows in the scene; just toggles draw.
+	for name in ["Clouds", "CloudsFar", "CloudShadows"]:
+		var rect := camera.get_node_or_null(name) as CanvasItem
+		if rect:
+			rect.visible = GameConfig.CLOUDS_ENABLED
 
 
 func _sync_map_layers_to_camera() -> void:

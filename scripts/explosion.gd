@@ -7,7 +7,7 @@ extends Node2D
 var _frames: Array[Texture2D] = []
 var _index: int = 0
 var _timer: float = 0.0
-const FRAME_TIME := 0.06
+const FRAME_TIME := 0.05
 
 
 func _ready() -> void:
@@ -19,7 +19,7 @@ func _ready() -> void:
 		queue_free()
 		return
 	sprite.texture = _frames[0]
-	sprite.scale = Vector2(0.12, 0.12)
+	sprite.scale = Vector2(0.0875, 0.0875)
 
 
 func _process(delta: float) -> void:

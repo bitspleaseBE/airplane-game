@@ -62,6 +62,7 @@ var _briefing_wing: GameConfig.PlaneType = GameConfig.PlaneType.BOMBER
 var _briefing_tween: Tween
 var _vig_pulse_tween: Tween
 var _cue_label_tween: Tween
+var _stars_tween: Tween
 var _wing_brief_queued := false
 var _playtest := false
 var _force_wing_briefing := false
@@ -406,8 +407,7 @@ func _on_won(stars: int = 3, campaign_complete: bool = false) -> void:
 	result_label.add_theme_color_override("font_color", Color(1, 0.93, 0.72, 0.95))
 	result_label.add_theme_color_override("font_outline_color", Color(0.12, 0.06, 0.02, 0.85))
 	result_label.add_theme_constant_override("outline_size", 5)
-	_set_stars(stars)
-	stars_row.visible = true
+	_animate_stars(stars)
 	new_game_button.visible = false
 	if campaign_complete:
 		result_label.text = "ARCHIPELAGO CLEARED.\nEvery bastion is smoke and glory."
@@ -423,6 +423,7 @@ func _on_lost() -> void:
 	hint_label.visible = false
 	if _briefing_open:
 		_dismiss_briefing(true)
+	_stop_stars_tween()
 	_show_result_backdrop()
 	result_label.add_theme_color_override("font_color", Color(1, 0.93, 0.72, 0.95))
 	result_label.add_theme_color_override("font_outline_color", Color(0.12, 0.06, 0.02, 0.85))
@@ -456,18 +457,56 @@ func _arm_action_buttons() -> void:
 	)
 
 
-func _set_stars(stars: int) -> void:
+func _animate_stars(stars: int) -> void:
+	## Grey empties first, then flip earned stars to gold one by one.
+	_stop_stars_tween()
 	var filled := clampi(stars, 0, 3)
 	for i in stars_row.get_child_count():
 		var icon := stars_row.get_child(i) as TextureRect
 		if icon == null:
 			continue
-		icon.texture = _STAR_FULL if i < filled else _STAR_EMPTY
-		icon.modulate = Color(1, 1, 1, 1.0 if i < filled else 0.55)
+		icon.texture = _STAR_EMPTY
+		icon.modulate = Color(1, 1, 1, 0.55)
+		icon.scale = Vector2.ONE
+		icon.pivot_offset = icon.custom_minimum_size * 0.5
+	stars_row.visible = true
+	stars_row.modulate = Color(1, 1, 1, 0)
+
+	_stars_tween = create_tween()
+	_stars_tween.tween_property(stars_row, "modulate:a", 1.0, 0.2)
+	_stars_tween.tween_interval(0.12)
+	for i in filled:
+		var icon := stars_row.get_child(i) as TextureRect
+		if icon == null:
+			continue
+		_stars_tween.tween_property(icon, "scale:x", 0.08, 0.11).set_trans(Tween.TRANS_SINE)
+		_stars_tween.tween_callback(_reveal_star.bind(icon))
+		_stars_tween.tween_property(icon, "scale:x", 1.0, 0.2).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		_stars_tween.parallel().tween_property(icon, "scale:y", 1.12, 0.1)
+		_stars_tween.tween_property(icon, "scale:y", 1.0, 0.12).set_trans(Tween.TRANS_SINE)
+		_stars_tween.tween_interval(0.1)
+
+
+func _reveal_star(icon: TextureRect) -> void:
+	if not is_instance_valid(icon):
+		return
+	icon.texture = _STAR_FULL
+	icon.modulate = Color(1, 1, 1, 1)
+
+
+func _stop_stars_tween() -> void:
+	if _stars_tween and _stars_tween.is_valid():
+		_stars_tween.kill()
+	_stars_tween = null
+	for i in stars_row.get_child_count():
+		var icon := stars_row.get_child(i) as TextureRect
+		if icon:
+			icon.scale = Vector2.ONE
 
 
 func _on_restart() -> void:
 	_stop_overlay_ambiance()
+	_stop_stars_tween()
 	overlay.visible = false
 	stars_row.visible = false
 	new_game_button.visible = false
@@ -478,6 +517,7 @@ func _on_restart() -> void:
 
 func _on_new_game() -> void:
 	_stop_overlay_ambiance()
+	_stop_stars_tween()
 	overlay.visible = false
 	stars_row.visible = false
 	new_game_button.visible = false

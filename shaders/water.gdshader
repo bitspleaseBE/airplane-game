@@ -63,37 +63,49 @@ void fragment() {
 	vec3 base;
 
 	if (open_ocean) {
-		// Distance to the nearest island coast drives the depth ramp:
-		// bright lagoon water near shores, deep blue in open sea.
-		// Noise warps the shelf so it isn't a perfect circle around each island.
+		// Top-down sea: depth from shore + small-scale ripples/glints.
+		// No side-view stripe trains — those look like smoke bands from above.
 		float shore_d = 1e6;
 		for (int i = 0; i < island_count; i++) {
 			vec2 delta = world_pos - island_centers[i];
 			float radial = length(delta) - island_radii[i];
 			float warp = (fbm(delta * 0.012 + vec2(float(i) * 17.0, 3.1)) - 0.5) * 90.0;
-			// Soft connected sandbar spots around each island.
 			float bars = max(fbm(delta * 0.018 + vec2(9.0, float(i) * 5.0)) - 0.55, 0.0) * 110.0;
 			shore_d = min(shore_d, radial + warp - bars);
 		}
 		shore_d = max(shore_d, 0.0);
 		float prox = 1.0 - smoothstep(0.0, 520.0, shore_d);
 
-		float depth_n = fbm(world_pos * 0.0012 + vec2(2.1, 7.3));
-		float d_far = mix(100.0, 300.0, depth_n);
-		// Keep open water a touch deeper near coasts so baked shelves pop.
-		float d_near = mix(35.0, 110.0, depth_n);
-		float d = mix(d_far, d_near, prox);
+		float d = mix(240.0, 48.0, prox);
+		d += (fbm(world_pos * 0.005) - 0.5) * 12.0;
 
 		base = shallows_color.rgb;
-		base = mix(base, lagoon_color.rgb, smoothstep(25.0, 80.0, d));
-		base = mix(base, ocean_color.rgb, smoothstep(70.0, 150.0, d));
-		base = mix(base, deep_color.rgb, smoothstep(140.0, 270.0, d));
+		base = mix(base, lagoon_color.rgb, smoothstep(18.0, 65.0, d));
+		base = mix(base, ocean_color.rgb, smoothstep(55.0, 130.0, d));
+		base = mix(base, deep_color.rgb, smoothstep(120.0, 250.0, d));
 
-		float blot = fbm(world_pos * 0.0035 + TIME * 0.008) - 0.5;
-		base *= 1.0 + blot * 0.045;
+		// Domain-warped ripple chop — soft surface texture from above.
+		vec2 uv = world_pos * 0.018;
+		vec2 flow_a = vec2(TIME * 0.22, TIME * 0.11);
+		vec2 flow_b = vec2(TIME * -0.14, TIME * 0.19);
+		vec2 warp2 = vec2(
+			fbm(uv * 0.7 + flow_a * 0.5),
+			fbm(uv * 0.7 + flow_b * 0.5 + vec2(3.1, 1.7))
+		);
+		float r1 = fbm(uv + warp2 * 1.4 + flow_a);
+		float r2 = fbm(uv * 1.7 - warp2 * 1.1 + flow_b + vec2(5.2, 9.4));
+		float chop = (r1 - 0.5) * 0.7 + (r2 - 0.5) * 0.45;
+		base *= 1.0 + chop * 0.07;
 
-		float swell = sin(world_pos.x * 0.008 + world_pos.y * 0.006 - TIME * 0.7);
-		base += swell * 0.015;
+		// Specular sparkles on the chop.
+		float glint = pow(max(r1 * r2, 0.0), 10.0);
+		base += glint * 0.18;
+
+		// Thin coastal foam lace.
+		float foam_band = (1.0 - smoothstep(1.0, 14.0, shore_d)) * smoothstep(0.4, 3.0, shore_d);
+		float foam_break = smoothstep(0.4, 0.75, fbm(world_pos * 0.05 + flow_a * 2.0));
+		float foam = foam_band * foam_break * (0.55 + 0.45 * sin(TIME * 1.6 + shore_d * 0.2));
+		base = mix(base, foam_color.rgb, clamp(foam * 0.42, 0.0, 1.0));
 	} else {
 		vec2 delta = world_pos - island_center;
 		float dist = length(delta);

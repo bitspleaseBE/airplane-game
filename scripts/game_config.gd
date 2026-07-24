@@ -84,7 +84,7 @@ const TURRET_MAX_HP := 40
 const TURRET_BOMB_DAMAGE := 20
 
 const PLANE_SPEED := 220.0
-const PLANE_BOMB_RADIUS := 95.0
+const PLANE_BOMB_RADIUS := 70.0
 const PLANE_SCALE := 0.9
 
 ## Hold-to-deploy gap between birds — lighter wings scramble faster.
@@ -115,6 +115,9 @@ const MISSILE_SPEED := 210.0
 const MISSILE_TURN_RATE := 2.8
 const MISSILE_DAMAGE := 3
 const MISSILE_LIFETIME := 4.0
+
+## Soft cloud banks + ocean shadows. Off for now — they muddy plane/AA readability.
+const CLOUDS_ENABLED := false
 
 ## Legacy single-island defaults (level-1 center / radius). Prefer runtime active center.
 const ISLAND_CENTER := Vector2(360, 640)
