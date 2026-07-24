@@ -1,7 +1,7 @@
 extends CanvasLayer
 
 ## HUD: squadron count, keep HP, level, star ratings, win/lose overlays, sound toggle,
-## and a one-shot warm mission briefing on first play.
+## first-play briefing, and one-shot wing-unlock vignettes.
 
 const SETTINGS_PATH := "user://settings.cfg"
 const _AUDIO_ON: Texture2D = preload("res://assets/ui/audio_on.png")
@@ -9,13 +9,10 @@ const _AUDIO_OFF: Texture2D = preload("res://assets/ui/audio_off.png")
 const _STAR_FULL: Texture2D = preload("res://assets/ui/star.png")
 const _STAR_EMPTY: Texture2D = preload("res://assets/ui/star_empty.png")
 
-## Radio-chatter callouts when a new airframe or bastion defense comes online.
+## Defense upgrades only — airframe unlocks use the wing vignette instead.
 const _UNLOCK_TOASTS := {
 	4: "BASTION UPGRADE: MISSILE BATTERIES\nHeads on a swivel, ace.",
-	6: "NEW AIRFRAME: BOMBER WING\nOne big egg, right on the keep.",
-	11: "NEW AIRFRAME: STRIKE WING\nFire and forget from way out.",
 	13: "BASTION UPGRADE: FLAK GUNS\nThe sky just grew teeth.",
-	16: "NEW AIRFRAME: CARPET WING\nThree eggs a pass. Flatten it.",
 }
 
 const _WING_HINTS := {
@@ -25,16 +22,49 @@ const _WING_HINTS := {
 	GameConfig.PlaneType.CARPET: "Tap the water, commander —\none pass, three gifts",
 }
 
+## First bastion of each new wing.
+const _WING_UNLOCK_LEVELS := {
+	6: GameConfig.PlaneType.BOMBER,
+	11: GameConfig.PlaneType.STRIKE,
+	16: GameConfig.PlaneType.CARPET,
+}
+
+const _WING_BRIEFINGS := {
+	GameConfig.PlaneType.BOMBER: "NEW PLANE: BOMBER\nDrops one big bomb on the keep.\nDeploys slower than gunships.",
+	GameConfig.PlaneType.STRIKE: "NEW PLANE: STRIKE\nFires a missile from range, then peels off.\nDeploys faster — spam them.",
+	GameConfig.PlaneType.CARPET: "NEW PLANE: CARPET\nDrops three bombs in one pass.\nSlowest to deploy — make each count.",
+}
+
+const _WING_CONTINUE_TEXT := "TAP TO CONTINUE"
+
+## CueLabel rect: first-play (lower) vs wing unlock (raised, gap above continue).
+const _CUE_RECT_FIRST := Vector4(-300.0, -210.0, 300.0, -70.0)
+const _CUE_RECT_WING := Vector4(-300.0, -400.0, 300.0, -200.0)
+
+const _WING_SETTINGS_KEYS := {
+	GameConfig.PlaneType.BOMBER: "bomber",
+	GameConfig.PlaneType.STRIKE: "strike",
+	GameConfig.PlaneType.CARPET: "carpet",
+}
+
+const _FIRST_BRIEFING_TEXT := "TAP THE OPEN WATER\nTO DEPLOY YOUR JETFIGHTERS"
+
+enum BriefingKind { NONE, FIRST, WING }
+
 var _main: Node2D
 var _sound_on: bool = true
 var _campaign_complete: bool = false
 var _last_level: int = 0
 var _toast_tween: Tween
 var _briefing_open := false
+var _briefing_kind: BriefingKind = BriefingKind.NONE
+var _briefing_wing: GameConfig.PlaneType = GameConfig.PlaneType.BOMBER
 var _briefing_tween: Tween
 var _vig_pulse_tween: Tween
 var _cue_label_tween: Tween
+var _wing_brief_queued := false
 var _playtest := false
+var _force_wing_briefing := false
 
 @onready var squadron_label: Label = $Root/TopBar/SquadronRow/SquadronLabel
 @onready var keep_bar: ProgressBar = $Root/TopBar/KeepBar
@@ -54,7 +84,9 @@ var _playtest := false
 @onready var briefing: Control = $Root/Briefing
 @onready var briefing_vignette: ColorRect = $Root/Briefing/Vignette
 @onready var tap_cue: Control = $Root/Briefing/TapCue
+@onready var wing_demo: Control = $Root/Briefing/WingDemo
 @onready var cue_label: Label = $Root/Briefing/CueLabel
+@onready var continue_label: Label = $Root/Briefing/ContinueLabel
 
 
 func _ready() -> void:
@@ -62,6 +94,7 @@ func _ready() -> void:
 	sound_button.pressed.connect(_on_sound_toggled)
 	briefing.gui_input.connect(_on_briefing_gui_input)
 	_playtest = OS.get_cmdline_user_args().has("--playtest")
+	_force_wing_briefing = _parse_force_wing_briefing()
 	if _playtest:
 		_sound_on = false
 		_refresh_sound_button()
@@ -84,6 +117,8 @@ func setup(main_ref: Node2D) -> void:
 	stars_row.visible = false
 	new_game_button.visible = false
 	briefing.visible = false
+	if wing_demo and wing_demo.has_method("stop"):
+		wing_demo.stop()
 	_on_squadron(GameConfig.squadron_for_level(1))
 	_on_keep_hp(GameConfig.KEEP_MAX_HP, GameConfig.KEEP_MAX_HP)
 	_on_level(1)
@@ -91,50 +126,118 @@ func setup(main_ref: Node2D) -> void:
 
 
 func force_briefing() -> void:
-	## Playtest / debug: show the briefing even if already seen.
-	_show_briefing()
+	## Playtest / debug: show the first-play briefing even if already seen.
+	_show_first_briefing()
+
+
+func force_wing_briefing(plane_type: GameConfig.PlaneType) -> void:
+	## Playtest / debug: show a wing unlock vignette immediately.
+	_show_wing_briefing(plane_type)
 
 
 func is_briefing_open() -> bool:
 	return _briefing_open
 
 
+func _parse_force_wing_briefing() -> bool:
+	for arg in OS.get_cmdline_user_args():
+		if arg == "--wing-briefing" or arg.begins_with("--wing-briefing="):
+			return true
+	return false
+
+
+func _forced_wing_type() -> GameConfig.PlaneType:
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--wing-briefing="):
+			var v := arg.trim_prefix("--wing-briefing=").strip_edges().to_lower()
+			match v:
+				"strike", "11":
+					return GameConfig.PlaneType.STRIKE
+				"carpet", "16":
+					return GameConfig.PlaneType.CARPET
+				_:
+					return GameConfig.PlaneType.BOMBER
+	return GameConfig.PlaneType.BOMBER
+
+
 func _maybe_show_first_briefing() -> void:
 	var args := OS.get_cmdline_user_args()
 	if args.has("--briefing"):
-		_show_briefing()
+		_show_first_briefing()
 		return
 	if _playtest:
 		return
 	if _load_briefing_seen():
 		return
-	_show_briefing()
+	_show_first_briefing()
 
 
-func _show_briefing() -> void:
+func _show_first_briefing() -> void:
 	if _briefing_open:
 		return
+	_briefing_kind = BriefingKind.FIRST
+	_set_cue_rect(_CUE_RECT_FIRST)
+	cue_label.text = _FIRST_BRIEFING_TEXT
+	continue_label.visible = false
+	tap_cue.visible = true
+	if wing_demo and wing_demo.has_method("stop"):
+		wing_demo.stop()
+	_open_briefing_shell()
+	if _briefing_tween and _briefing_tween.is_valid():
+		_briefing_tween.kill()
+	_briefing_tween = create_tween()
+	_briefing_tween.set_parallel(true)
+	tap_cue.modulate = Color(1, 1, 1, 0)
+	cue_label.modulate = Color(1, 1, 1, 0)
+	_briefing_tween.tween_property(tap_cue, "modulate:a", 1.0, 0.5).set_delay(0.1)
+	_briefing_tween.tween_property(cue_label, "modulate:a", 1.0, 0.5).set_delay(0.15)
+	_start_briefing_ambiance(false)
+
+
+func _show_wing_briefing(plane_type: GameConfig.PlaneType) -> void:
+	if _briefing_open:
+		return
+	if not _WING_BRIEFINGS.has(plane_type):
+		return
+	_briefing_kind = BriefingKind.WING
+	_briefing_wing = plane_type
+	_set_cue_rect(_CUE_RECT_WING)
+	cue_label.text = _WING_BRIEFINGS[plane_type]
+	continue_label.text = _WING_CONTINUE_TEXT
+	continue_label.visible = true
+	tap_cue.visible = false
+	if wing_demo and wing_demo.has_method("setup"):
+		wing_demo.setup(plane_type)
+	_open_briefing_shell()
+	if _briefing_tween and _briefing_tween.is_valid():
+		_briefing_tween.kill()
+	_briefing_tween = create_tween()
+	_briefing_tween.set_parallel(true)
+	cue_label.modulate = Color(1, 1, 1, 0)
+	continue_label.modulate = Color(1, 1, 1, 0)
+	_briefing_tween.tween_property(cue_label, "modulate:a", 1.0, 0.45).set_delay(0.1)
+	_briefing_tween.tween_property(continue_label, "modulate:a", 1.0, 0.45).set_delay(0.2)
+	_start_briefing_ambiance(true)
+
+
+func _set_cue_rect(rect: Vector4) -> void:
+	cue_label.offset_left = rect.x
+	cue_label.offset_top = rect.y
+	cue_label.offset_right = rect.z
+	cue_label.offset_bottom = rect.w
+
+
+func _open_briefing_shell() -> void:
 	_briefing_open = true
 	hint_label.visible = false
 	briefing.visible = true
 	briefing.mouse_filter = Control.MOUSE_FILTER_STOP
 	briefing.modulate = Color(1, 1, 1, 1)
-	tap_cue.modulate = Color(1, 1, 1, 0)
-	cue_label.modulate = Color(1, 1, 1, 0)
 	if briefing_vignette.material:
 		briefing_vignette.material.set_shader_parameter("pulse", 0.0)
 
-	if _briefing_tween and _briefing_tween.is_valid():
-		_briefing_tween.kill()
-	_briefing_tween = create_tween()
-	_briefing_tween.set_parallel(true)
-	_briefing_tween.tween_property(tap_cue, "modulate:a", 1.0, 0.5).set_delay(0.1)
-	_briefing_tween.tween_property(cue_label, "modulate:a", 1.0, 0.5).set_delay(0.15)
 
-	_start_briefing_ambiance()
-
-
-func _start_briefing_ambiance() -> void:
+func _start_briefing_ambiance(pulse_continue: bool = false) -> void:
 	if _vig_pulse_tween and _vig_pulse_tween.is_valid():
 		_vig_pulse_tween.kill()
 	if briefing_vignette.material:
@@ -145,14 +248,18 @@ func _start_briefing_ambiance() -> void:
 	if _cue_label_tween and _cue_label_tween.is_valid():
 		_cue_label_tween.kill()
 	_cue_label_tween = create_tween().set_loops()
-	_cue_label_tween.tween_property(cue_label, "modulate", Color(1, 0.93, 0.72, 1.0), 0.7)
-	_cue_label_tween.tween_property(cue_label, "modulate", Color(1, 0.85, 0.45, 0.75), 0.7)
+	# Pulse the continue cue on wing briefs; body text stays steady and readable.
+	var pulse_target: CanvasItem = continue_label if pulse_continue else cue_label
+	_cue_label_tween.tween_property(pulse_target, "modulate", Color(1, 0.93, 0.72, 1.0), 0.7)
+	_cue_label_tween.tween_property(pulse_target, "modulate", Color(1, 0.85, 0.45, 0.75), 0.7)
 
 
 func _set_vig_pulse(v: float) -> void:
-	# Briefing + lose overlay share the vignette material — one pulse drives both.
+	# Briefing + result overlay share one ShaderMaterial instance.
 	if briefing_vignette and briefing_vignette.material:
 		briefing_vignette.material.set_shader_parameter("pulse", v)
+	elif overlay_vignette and overlay_vignette.material:
+		overlay_vignette.material.set_shader_parameter("pulse", v)
 
 
 func _start_overlay_ambiance() -> void:
@@ -188,8 +295,13 @@ func _on_briefing_gui_input(event: InputEvent) -> void:
 func _dismiss_briefing(save_seen: bool = true) -> void:
 	if not _briefing_open:
 		return
+	var kind := _briefing_kind
+	var wing := _briefing_wing
 	_briefing_open = false
+	_briefing_kind = BriefingKind.NONE
 	briefing.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if wing_demo and wing_demo.has_method("stop"):
+		wing_demo.stop()
 	if _vig_pulse_tween and _vig_pulse_tween.is_valid():
 		_vig_pulse_tween.kill()
 	if _cue_label_tween and _cue_label_tween.is_valid():
@@ -201,10 +313,16 @@ func _dismiss_briefing(save_seen: bool = true) -> void:
 	_briefing_tween.tween_callback(func() -> void:
 		briefing.visible = false
 		briefing.modulate = Color(1, 1, 1, 1)
+		tap_cue.visible = true
+		continue_label.visible = false
+		_set_cue_rect(_CUE_RECT_FIRST)
 		hint_label.visible = true
 	)
 	if save_seen and not _playtest:
-		_save_briefing_seen(true)
+		if kind == BriefingKind.FIRST:
+			_save_briefing_seen(true)
+		elif kind == BriefingKind.WING:
+			_save_wing_briefing_seen(wing, true)
 
 
 func _on_squadron(remaining: int) -> void:
@@ -223,9 +341,47 @@ func _on_level(level: int) -> void:
 	var tint: Color = GameConfig.PLANE_TYPE_TINTS[wing_type]
 	wing_label.add_theme_color_override("font_color", Color(tint.r, tint.g, tint.b, 0.95))
 	hint_label.text = _WING_HINTS[wing_type]
-	if level != _last_level and _UNLOCK_TOASTS.has(level):
+	var prev := _last_level
+	if level != prev and _UNLOCK_TOASTS.has(level):
 		_show_toast(_UNLOCK_TOASTS[level])
+	if level != prev and _WING_UNLOCK_LEVELS.has(level):
+		_queue_wing_briefing(_WING_UNLOCK_LEVELS[level])
 	_last_level = level
+
+
+func _queue_wing_briefing(plane_type: GameConfig.PlaneType) -> void:
+	if _wing_brief_queued or _briefing_open:
+		return
+	if _playtest and not _force_wing_briefing:
+		return
+	if not _force_wing_briefing and _load_wing_briefing_seen(plane_type):
+		return
+	_wing_brief_queued = true
+	_await_playing_then_show_wing(plane_type)
+
+
+func _await_playing_then_show_wing(plane_type: GameConfig.PlaneType) -> void:
+	# Camera pan leaves state=TRANSITION; wait until the bastion is live.
+	while is_instance_valid(_main) and not _main_is_playing():
+		await get_tree().process_frame
+	await get_tree().process_frame
+	_wing_brief_queued = false
+	if not is_instance_valid(_main):
+		return
+	if overlay.visible or _briefing_open:
+		return
+	if not _force_wing_briefing and _load_wing_briefing_seen(plane_type):
+		return
+	_show_wing_briefing(plane_type)
+
+
+func _main_is_playing() -> bool:
+	if _main == null:
+		return false
+	if _main.has_method("is_playing"):
+		return bool(_main.is_playing())
+	# State.PLAYING == 0
+	return int(_main.get("state")) == 0
 
 
 func _show_toast(message: String) -> void:
@@ -246,13 +402,10 @@ func _on_won(stars: int = 3, campaign_complete: bool = false) -> void:
 	hint_label.visible = false
 	if _briefing_open:
 		_dismiss_briefing(true)
-	_stop_overlay_ambiance()
-	overlay.visible = true
-	overlay_vignette.visible = false
-	overlay_dim.visible = true
-	overlay_dim.color = Color(0.05, 0.15, 0.08, 0.72)
-	result_label.add_theme_color_override("font_color", Color(1, 1, 1, 1))
-	result_label.add_theme_constant_override("outline_size", 0)
+	_show_result_backdrop()
+	result_label.add_theme_color_override("font_color", Color(1, 0.93, 0.72, 0.95))
+	result_label.add_theme_color_override("font_outline_color", Color(0.12, 0.06, 0.02, 0.85))
+	result_label.add_theme_constant_override("outline_size", 5)
 	_set_stars(stars)
 	stars_row.visible = true
 	new_game_button.visible = false
@@ -270,9 +423,7 @@ func _on_lost() -> void:
 	hint_label.visible = false
 	if _briefing_open:
 		_dismiss_briefing(true)
-	overlay.visible = true
-	overlay_vignette.visible = true
-	overlay_dim.visible = false
+	_show_result_backdrop()
 	result_label.add_theme_color_override("font_color", Color(1, 0.93, 0.72, 0.95))
 	result_label.add_theme_color_override("font_outline_color", Color(0.12, 0.06, 0.02, 0.85))
 	result_label.add_theme_constant_override("outline_size", 5)
@@ -281,8 +432,15 @@ func _on_lost() -> void:
 	restart_button.text = "Try again"
 	new_game_button.visible = true
 	new_game_button.text = "Start over"
-	_start_overlay_ambiance()
 	_arm_action_buttons()
+
+
+func _show_result_backdrop() -> void:
+	## Same warm vignette as the tap-water / new-plane briefings.
+	overlay.visible = true
+	overlay_vignette.visible = true
+	overlay_dim.visible = false
+	_start_overlay_ambiance()
 
 
 func _arm_action_buttons() -> void:
@@ -371,4 +529,24 @@ func _save_briefing_seen(seen: bool) -> void:
 	var cfg := ConfigFile.new()
 	cfg.load(SETTINGS_PATH)
 	cfg.set_value("briefing", "seen", seen)
+	cfg.save(SETTINGS_PATH)
+
+
+func _load_wing_briefing_seen(plane_type: GameConfig.PlaneType) -> bool:
+	var key: String = _WING_SETTINGS_KEYS.get(plane_type, "")
+	if key.is_empty():
+		return true
+	var cfg := ConfigFile.new()
+	if cfg.load(SETTINGS_PATH) != OK:
+		return false
+	return bool(cfg.get_value("wing_briefing", key, false))
+
+
+func _save_wing_briefing_seen(plane_type: GameConfig.PlaneType, seen: bool) -> void:
+	var key: String = _WING_SETTINGS_KEYS.get(plane_type, "")
+	if key.is_empty():
+		return
+	var cfg := ConfigFile.new()
+	cfg.load(SETTINGS_PATH)
+	cfg.set_value("wing_briefing", key, seen)
 	cfg.save(SETTINGS_PATH)

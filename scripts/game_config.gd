@@ -50,6 +50,9 @@ const STRIKE_MISSILE_SPEED := 300.0
 const STRIKE_MISSILE_TURN_RATE := 4.5
 const STRIKE_SPEED_MULT := 1.15
 
+## Bomber (levels 6–10): must overfly the keep — needs pace to punch through AA.
+const BOMBER_SPEED_MULT := 1.35
+
 ## Carpet bomber (levels 16–20): one plane lays 3 bombs along the keep track.
 const CARPET_BOMB_COUNT := 3
 const CARPET_BOMB_DAMAGE := 10
@@ -81,7 +84,7 @@ const TURRET_MAX_HP := 40
 const TURRET_BOMB_DAMAGE := 20
 
 const PLANE_SPEED := 220.0
-const PLANE_BOMB_RADIUS := 70.0
+const PLANE_BOMB_RADIUS := 95.0
 const PLANE_SCALE := 0.9
 
 ## Hold-to-deploy gap between birds — lighter wings scramble faster.
@@ -203,10 +206,11 @@ func turret_count_for_level(level: int) -> int:
 
 func tower_count_range_for_level(level: int) -> Vector2i:
 	# 1 early → denser late; milestone bastions pack a thick outer ring.
+	# L10 is still a bomber-overfly siege — keep the ring fat, not impossible.
 	var n := clampi(level, 1, LEVEL_COUNT)
 	if is_stronghold_level(n):
 		if n == 10:
-			return Vector2i(6, 8)
+			return Vector2i(4, 5)
 		if n == 15:
 			return Vector2i(7, 9)
 		return Vector2i(8, 10)

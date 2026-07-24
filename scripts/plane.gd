@@ -53,6 +53,8 @@ func setup(
 	match type:
 		GameConfig.PlaneType.GUNSHIP:
 			speed = GameConfig.PLANE_SPEED * GameConfig.GUNSHIP_SPEED_MULT
+		GameConfig.PlaneType.BOMBER:
+			speed = GameConfig.PLANE_SPEED * GameConfig.BOMBER_SPEED_MULT
 		GameConfig.PlaneType.STRIKE:
 			speed = GameConfig.PLANE_SPEED * GameConfig.STRIKE_SPEED_MULT
 		GameConfig.PlaneType.CARPET:
@@ -171,7 +173,9 @@ func _carpet_pass(delta: float) -> void:
 		var along := (float(_carpet_stick) - 1.0) * GameConfig.CARPET_BOMB_SPACING
 		var blast_pos := _keep_pos - _carpet_dir * along
 		_carpet_stick += 1
-		if _main and _main.has_method("apply_bomb_at"):
+		if _main and _main.has_method("launch_bomb"):
+			_main.launch_bomb(global_position, blast_pos, GameConfig.CARPET_BOMB_DAMAGE)
+		elif _main and _main.has_method("apply_bomb_at"):
 			_main.apply_bomb_at(blast_pos, GameConfig.CARPET_BOMB_DAMAGE)
 	if _bombs_left <= 0:
 		_begin_exit(_carpet_dir)
@@ -197,8 +201,11 @@ func _fire_strike_missile() -> void:
 
 func _drop_bomb() -> void:
 	bomb_dropped = true
-	if _main and _main.has_method("apply_bomb_at"):
-		_main.apply_bomb_at(global_position, GameConfig.KEEP_BOMB_DAMAGE)
+	# Fall onto the keep so the boom lands after the release, not as a blink.
+	if _main and _main.has_method("launch_bomb"):
+		_main.launch_bomb(global_position, _keep_pos, GameConfig.KEEP_BOMB_DAMAGE)
+	elif _main and _main.has_method("apply_bomb_at"):
+		_main.apply_bomb_at(_keep_pos, GameConfig.KEEP_BOMB_DAMAGE)
 
 
 func _begin_exit(dir: Vector2) -> void:
@@ -289,8 +296,13 @@ func _finish(delivered: bool) -> void:
 		return
 	_done = true
 	set_physics_process(false)
-	finished.emit(delivered)
+	# Mark deletion before emitting so squadron-spent checks skip this bird.
 	queue_free()
+	finished.emit(delivered)
+
+
+func is_spent() -> bool:
+	return _done or is_queued_for_deletion()
 
 
 func _on_area_entered(area: Area2D) -> void:

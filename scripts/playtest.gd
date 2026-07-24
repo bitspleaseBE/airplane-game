@@ -15,7 +15,9 @@ extends Node
 ##   --seed=N              fixed RNG seed for reproducible runs
 ##   --level=N             forwarded to the game via main.set_level(N) if it exists
 ##   --briefing            force the first-play mission briefing on screen
+##   --wing-briefing[=NAME] force wing unlock vignette (bomber|strike|carpet)
 ##   --force-lose          after the start shot, fire the lose overlay (HUD UI check)
+##   --squadron=N          shrink reserves to N so depleting the budget can resolve as a loss
 
 const WAVE_SIZE := 5
 
@@ -28,7 +30,10 @@ var _strategy := "spread"
 var _level := 1
 var _rng_seed := -1
 var _force_briefing := false
+var _force_wing_briefing := false
+var _force_wing_name := "bomber"
 var _force_lose := false
+var _squadron_cap := -1
 
 var _main: Node2D
 var _result := "timeout"
@@ -68,10 +73,16 @@ func _ready() -> void:
 			_level = int(arg.trim_prefix("--level="))
 		elif arg == "--briefing":
 			_force_briefing = true
+		elif arg == "--wing-briefing" or arg.begins_with("--wing-briefing="):
+			_force_wing_briefing = true
+			if arg.begins_with("--wing-briefing="):
+				_force_wing_name = arg.trim_prefix("--wing-briefing=").strip_edges().to_lower()
 		elif arg == "--force-lose":
 			_force_lose = true
 			_planes_to_spawn = 0
 			_duration = mini(_duration, 4.0)
+		elif arg.begins_with("--squadron="):
+			_squadron_cap = int(arg.trim_prefix("--squadron="))
 	if _rng_seed >= 0:
 		seed(_rng_seed)
 	DirAccess.make_dir_recursive_absolute(_abs_out())
@@ -104,7 +115,14 @@ func _run() -> void:
 		_main.game_lost.connect(func() -> void: _result = "lost")
 	if _main.has_method("set_level"):
 		_main.set_level(_level)
-	if _planes_all and "squadron_size" in _main:
+	if _squadron_cap > 0 and "planes_remaining" in _main:
+		_main.squadron_size = _squadron_cap
+		_main.planes_remaining = _squadron_cap
+		if _main.has_signal("squadron_changed"):
+			_main.squadron_changed.emit(_squadron_cap)
+		_planes_to_spawn = _squadron_cap
+		_planes_all = true
+	elif _planes_all and "squadron_size" in _main:
 		_planes_to_spawn = int(_main.squadron_size)
 
 	if _force_briefing:
@@ -113,6 +131,19 @@ func _run() -> void:
 			hud.force_briefing()
 			# Let the pop-in tween settle before the first shot.
 			await get_tree().create_timer(0.7).timeout
+	elif _force_wing_briefing:
+		var hud_w := _main.get_node_or_null("HUD")
+		if hud_w and hud_w.has_method("force_wing_briefing"):
+			var wing_type: GameConfig.PlaneType = GameConfig.PlaneType.BOMBER
+			match _force_wing_name:
+				"strike", "11":
+					wing_type = GameConfig.PlaneType.STRIKE
+				"carpet", "16":
+					wing_type = GameConfig.PlaneType.CARPET
+				_:
+					wing_type = GameConfig.PlaneType.BOMBER
+			hud_w.force_wing_briefing(wing_type)
+			await get_tree().create_timer(1.4).timeout
 
 	await _screenshot("start")
 
@@ -161,7 +192,8 @@ func _deploy_bomber(i: int) -> bool:
 	var water_min := GameConfig.WATER_MIN_RADIUS
 	if _main.has_method("active_water_min_radius"):
 		water_min = _main.active_water_min_radius()
-	var radius := water_min + randf_range(15.0, 55.0)
+	# Mix near-shore lagoon taps with deep open-water taps (both must work).
+	var radius := water_min + randf_range(20.0, 420.0)
 	var world := center + Vector2.from_angle(_deploy_angle(i)) * radius
 
 	# Property may be missing if main.gd currently fails to parse; stay quiet.
@@ -174,7 +206,8 @@ func _deploy_bomber(i: int) -> bool:
 		return true
 	if _main.has_method("_try_spawn"):
 		# Input transform mismatch fallback: spawn through the game API instead.
-		_main._try_spawn(world)
+		# from_press=true — discrete taps always deploy, same as a real click.
+		_main._try_spawn(world, true)
 		if before >= 0 and _main.planes_remaining < before:
 			_direct_spawns += 1
 			return true

@@ -1,4 +1,4 @@
-[gd_scene load_steps=14 format=3]
+[gd_scene load_steps=16 format=3]
 
 [ext_resource type="Script" path="res://scripts/hud.gd" id="1"]
 [ext_resource type="Texture2D" path="res://assets/ui/audio_on.png" id="2"]
@@ -8,6 +8,8 @@
 [ext_resource type="Texture2D" path="res://assets/ui/castle.png" id="6"]
 [ext_resource type="Shader" path="res://shaders/briefing_vignette.gdshader" id="7"]
 [ext_resource type="Script" path="res://scripts/briefing_tap_cue.gd" id="8"]
+[ext_resource type="Script" path="res://scripts/briefing_wing_demo.gd" id="9"]
+[ext_resource type="Texture2D" path="res://assets/planes/bomber.png" id="10"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_bar_bg"]
 bg_color = Color(0.12, 0.14, 0.16, 0.85)
@@ -400,6 +402,19 @@ mouse_filter = 2
 material = SubResource("ShaderMaterial_briefing_vig")
 color = Color(1, 1, 1, 1)
 
+[node name="WingDemo" type="Control" parent="Root/Briefing"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = 180.0
+offset_bottom = -220.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("9")
+plane_tex = ExtResource("10")
+
 [node name="TapCue" type="Control" parent="Root/Briefing"]
 clip_contents = true
 layout_mode = 1
@@ -425,19 +440,42 @@ anchor_left = 0.5
 anchor_top = 1.0
 anchor_right = 0.5
 anchor_bottom = 1.0
-offset_left = -280.0
-offset_top = -172.0
-offset_right = 280.0
-offset_bottom = -100.0
+offset_left = -300.0
+offset_top = -210.0
+offset_right = 300.0
+offset_bottom = -70.0
 grow_horizontal = 2
 grow_vertical = 0
 mouse_filter = 2
 theme_override_colors/font_color = Color(1, 0.93, 0.72, 0.95)
 theme_override_colors/font_outline_color = Color(0.12, 0.06, 0.02, 0.85)
 theme_override_constants/outline_size = 5
-theme_override_constants/line_spacing = -10
+theme_override_constants/line_spacing = -4
 theme_override_font_sizes/font_size = 22
 text = "TAP THE OPEN WATER
 TO DEPLOY YOUR JETFIGHTERS"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="ContinueLabel" type="Label" parent="Root/Briefing"]
+visible = false
+layout_mode = 1
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -280.0
+offset_top = -110.0
+offset_right = 280.0
+offset_bottom = -70.0
+grow_horizontal = 2
+grow_vertical = 0
+mouse_filter = 2
+theme_override_colors/font_color = Color(1, 0.93, 0.72, 0.95)
+theme_override_colors/font_outline_color = Color(0.12, 0.06, 0.02, 0.85)
+theme_override_constants/outline_size = 5
+theme_override_font_sizes/font_size = 22
+text = "TAP TO CONTINUE"
 horizontal_alignment = 1
 vertical_alignment = 1

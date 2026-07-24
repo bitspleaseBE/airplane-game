@@ -39,6 +39,7 @@ var _plane_scene: PackedScene = preload("res://scenes/plane.tscn")
 var _explosion_scene: PackedScene = preload("res://scenes/explosion.tscn")
 var _island_scene: PackedScene = preload("res://scenes/island.tscn")
 var _strike_missile_scene: PackedScene = preload("res://scenes/strike_missile.tscn")
+var _falling_bomb_scene: PackedScene = preload("res://scenes/falling_bomb.tscn")
 
 enum Boom { BOMB, CRASH, BIG }
 
@@ -62,11 +63,15 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	_sync_map_layers_to_camera()
 	_spawn_cooldown = max(_spawn_cooldown - delta, 0.0)
+	# Safety net: if the counter is empty and nothing's airborne, settle the siege.
+	if state == State.PLAYING and planes_remaining <= 0 and active_planes <= 0:
+		_check_squadron_spent()
 	if state != State.PLAYING or not _holding:
 		return
 	_hold_pos = get_global_mouse_position()
+	# Hold-to-repeat respects scramble gap; discrete presses bypass it.
 	if _spawn_cooldown <= 0.0:
-		_try_spawn(_hold_pos)
+		_try_spawn(_hold_pos, false)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -78,7 +83,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		if event.pressed:
 			_holding = true
 			_hold_pos = _screen_to_world(event.position)
-			_try_spawn(_hold_pos)
+			_try_spawn(_hold_pos, true)
 		elif event.index == 0:
 			_holding = false
 	elif event is InputEventScreenDrag:
@@ -87,7 +92,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		_holding = event.pressed
 		if event.pressed:
 			_hold_pos = get_global_mouse_position()
-			_try_spawn(_hold_pos)
+			_try_spawn(_hold_pos, true)
 	elif event is InputEventMouseMotion and _holding:
 		_hold_pos = get_global_mouse_position()
 
@@ -101,6 +106,10 @@ func set_level(n: int) -> void:
 	var level := clampi(n, 1, GameConfig.LEVEL_COUNT)
 	_clear_combatants()
 	_activate_level(level, false)
+
+
+func is_playing() -> bool:
+	return state == State.PLAYING
 
 
 func advance_or_restart() -> void:
@@ -144,22 +153,34 @@ func restart() -> void:
 	advance_or_restart()
 
 
-func _try_spawn(world_pos: Vector2) -> void:
+## from_press: true on click/tap — always deploy once. false while holding —
+## wait for the plane's scramble interval between birds.
+func _try_spawn(world_pos: Vector2, from_press: bool = false) -> void:
 	if state != State.PLAYING or _active_island == null:
 		return
-	if planes_remaining <= 0 or _spawn_cooldown > 0.0:
+	if hud and hud.has_method("is_briefing_open") and hud.is_briefing_open():
+		return
+	if planes_remaining <= 0:
+		return
+	if not from_press and _spawn_cooldown > 0.0:
 		return
 
 	var center := active_center
 	var dist := world_pos.distance_to(center)
 	var theta := (world_pos - center).angle()
 	var shore: float = _active_island.get_shore_radius(theta)
-	var water_min: float = _active_island.get_water_min_radius()
-	if dist < maxf(shore + 12.0, water_min * 0.85):
-		return  # Must tap water around the active island
-	# Keep deploys in a ring around the active bastion (not on distant islands).
-	if dist > water_min + 220.0:
+	# Land only — shallow lagoon and deep open water are both fair game.
+	if dist < shore + 12.0:
 		return
+	# Don't seed a bird on top of another bastion's island.
+	for island in _islands:
+		if island == null or island == _active_island:
+			continue
+		var other_c: Vector2 = island.get_center()
+		var other_d := world_pos.distance_to(other_c)
+		var other_shore: float = island.get_shore_radius((world_pos - other_c).angle())
+		if other_d < other_shore + 12.0:
+			return
 
 	var plane_type: GameConfig.PlaneType = GameConfig.plane_type_for_level(current_level)
 	_spawn_cooldown = GameConfig.deploy_interval_for_plane(plane_type)
@@ -177,6 +198,8 @@ func _try_spawn(world_pos: Vector2) -> void:
 func _on_plane_finished(_delivered_bomb: bool) -> void:
 	active_planes = max(active_planes - 1, 0)
 	_check_squadron_spent()
+	# Re-check next idle frame — covers any residual living-node timing.
+	call_deferred("_check_squadron_spent")
 
 
 func _check_squadron_spent() -> void:
@@ -194,8 +217,11 @@ func _check_squadron_spent() -> void:
 func _living_plane_count() -> int:
 	var n := 0
 	for p in planes.get_children():
-		if is_instance_valid(p) and not p.is_queued_for_deletion():
-			n += 1
+		if not is_instance_valid(p) or p.is_queued_for_deletion():
+			continue
+		if p.has_method("is_spent") and p.is_spent():
+			continue
+		n += 1
 	return n
 
 
@@ -229,7 +255,8 @@ func _set_lost() -> void:
 
 
 func apply_bomb_at(pos: Vector2, damage: int) -> void:
-	_spawn_explosion(pos, 1.0, Boom.BOMB)
+	# Punchier blast so bomb hits read clearly vs. grey smoke puffs.
+	_spawn_explosion(pos, 1.65, Boom.BOMB)
 	if _active_island:
 		_active_island.apply_bomb_at(pos, damage)
 
@@ -246,6 +273,14 @@ func launch_strike_missile(pos: Vector2, angle: float, target_pos: Vector2) -> v
 	var missile: StrikeMissile = _strike_missile_scene.instantiate()
 	bullets.add_child(missile)
 	missile.setup(pos, angle, target_pos, self)
+	_pending_ordnance += 1
+
+
+func launch_bomb(from_pos: Vector2, target_pos: Vector2, damage: int) -> void:
+	var bomb: Node2D = _falling_bomb_scene.instantiate()
+	effects.add_child(bomb)
+	if bomb.has_method("setup"):
+		bomb.setup(from_pos, target_pos, damage, self)
 	_pending_ordnance += 1
 
 
@@ -482,6 +517,8 @@ func _clear_combatants() -> void:
 		p.queue_free()
 	for b in bullets.get_children():
 		b.queue_free()
+	for fx in effects.get_children():
+		fx.queue_free()
 	active_planes = 0
 	_pending_ordnance = 0
 
