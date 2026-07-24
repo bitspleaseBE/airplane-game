@@ -81,7 +81,7 @@ Two sentences, max. What is this game and why is it fun?
   - HTML5 export works; Android/iOS presets documented
 - **Explicit non-goals for v1.0:** (things we agree NOT to build)
   - Multiple plane types (napalm, carpet, guided, etc.) — *shipped later, in v1.2: level-bound wings (gunship / bomber / strike / carpet)*
-  - Stronghold evolution (missile, AA, smoke) — *shipped later, in v1.2: missile at 4, flak at 13, smoke at 18*
+  - Stronghold evolution (missile, AA) — *shipped later, in v1.2: missile at 4, flak at 13*
   - Multi-level campaign / shop / upgrades
   - Online multiplayer or leaderboards
   - Full music score

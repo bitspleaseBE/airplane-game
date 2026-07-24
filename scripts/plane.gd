@@ -20,7 +20,6 @@ var _smoke_timer: float = 0.0
 var _spin: float = 0.0
 var _exit_dir: Vector2 = Vector2.RIGHT
 var _exit_time: float = 0.0
-var _slow_timer: float = 0.0
 
 # Gunship strafing run
 var _shots_left: int = GameConfig.GUNSHIP_SHOT_COUNT
@@ -70,7 +69,6 @@ func _ready() -> void:
 
 
 func _physics_process(delta: float) -> void:
-	_slow_timer = max(_slow_timer - delta, 0.0)
 	match phase:
 		Phase.FLYING:
 			_fly(delta)
@@ -80,21 +78,10 @@ func _physics_process(delta: float) -> void:
 			_exit(delta)
 
 
-## Smoke screens re-apply this every frame a plane is inside the haze.
-func apply_smoke_slow() -> void:
-	_slow_timer = 0.3
-
-
 func current_velocity() -> Vector2:
 	if phase != Phase.FLYING:
 		return Vector2.ZERO
-	return Vector2.from_angle(rotation) * _effective_speed()
-
-
-func _effective_speed() -> float:
-	if _slow_timer > 0.0:
-		return speed * GameConfig.SMOKE_SLOW_FACTOR
-	return speed
+	return Vector2.from_angle(rotation) * speed
 
 
 func _fly(delta: float) -> void:
@@ -103,7 +90,7 @@ func _fly(delta: float) -> void:
 		return
 
 	var dir := (target - global_position).normalized()
-	global_position += dir * _effective_speed() * delta
+	global_position += dir * speed * delta
 	rotation = dir.angle()
 	shadow.position = Vector2(8, 10)
 	var dist := global_position.distance_to(target)
@@ -137,7 +124,7 @@ func _fly(delta: float) -> void:
 
 ## Straight run across the fort, laying bombs at fixed intervals.
 func _carpet_pass(delta: float) -> void:
-	global_position += _carpet_dir * _effective_speed() * delta
+	global_position += _carpet_dir * speed * delta
 	rotation = _carpet_dir.angle()
 	_bomb_timer -= delta
 	if _bombs_left > 0 and _bomb_timer <= 0.0:
@@ -182,7 +169,7 @@ func _begin_exit(dir: Vector2) -> void:
 
 func _exit(delta: float) -> void:
 	_exit_time += delta
-	global_position += _exit_dir * _effective_speed() * 1.15 * delta
+	global_position += _exit_dir * speed * 1.15 * delta
 	rotation = _exit_dir.angle()
 	# Leave the playfield, then despawn (distance, off-screen, or timeout safety).
 	if (

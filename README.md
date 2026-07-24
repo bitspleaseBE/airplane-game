@@ -14,7 +14,7 @@ Or open this folder in the Godot 4.7 editor and press Play.
 
 **Controls:** tap / click the blue water around the island to deploy a plane. Each bastion has a fixed squadron (40 on level 1, growing as you advance). Destroy the central keep to win; spend the squadron with the keep still standing and you lose. Beat a bastion to pan to the next of 20 islands.
 
-**Airframes are earned per level band:** gunships (1–5) strafe the fort with their nose gun, bombers (6–10) drop one heavy bomb, strike jets (11–15) fire a guided missile from standoff and bank away, carpet bombers (16–20) lay three bombs in a line across the fort. The stronghold evolves too — missile batteries from level 4, flak airbursts from 13, smoke screens from 18.
+**Airframes are earned per level band:** gunships (1–5) strafe the fort with their nose gun, bombers (6–10) drop one heavy bomb, strike jets (11–15) fire a guided missile from standoff and bank away, carpet bombers (16–20) lay three bombs in a line across the fort. The stronghold evolves too — missile batteries from level 4, flak airbursts from 13.
 
 ## Automated playtest
 
@@ -91,8 +91,8 @@ Orientation is locked to portrait in the preset.
 - Squadron: 40 + 3×(level−1) planes per bastion
 - Wings by level band: gunship 1–5 (5 strafe shots × 4 dmg), bomber 6–10 (one 20-dmg bomb), strike 11–15 (guided missile, 20 dmg, launched 160 px out), carpet 16–20 (3 bombs × 10 dmg in a line)
 - Keep HP: 100 + 4×(level−1); corner AA and outer towers scale up
-- Stronghold arsenal: machine guns from level 1, missile launchers from 4, flak airbursts from 13 (downs every plane within 60 px of the burst), smoke screens from 18 (planes in the haze fly at 55% speed)
-- Defense pads are color-coded: red = keep AA, green = MG, amber = missile, crimson = flak, slate = smoke
+- Stronghold arsenal: machine guns from level 1, missile launchers from 4, flak airbursts from 13 (downs every plane within 60 px of the burst)
+- Defense pads are color-coded: red = keep AA, green = MG, amber = missile, crimson = flak
 - Stars on win: 3 = lean run, 1 = used all but 5 planes, 2 = in between
 - One bullet downs a plane (sizzle-down, no payload)
 

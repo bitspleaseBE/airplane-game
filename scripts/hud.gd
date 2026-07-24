@@ -13,7 +13,6 @@ const _UNLOCK_TOASTS := {
 	11: "NEW AIRFRAME: STRIKE WING\nFire and forget from way out.",
 	13: "BASTION UPGRADE: FLAK GUNS\nThe sky just grew teeth.",
 	16: "NEW AIRFRAME: CARPET WING\nThree eggs a pass. Flatten it.",
-	18: "BASTION UPGRADE: SMOKE SCREENS\nThey're hiding in the haze.",
 }
 
 const _WING_HINTS := {

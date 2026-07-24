@@ -247,16 +247,11 @@ func _scatter_towers() -> void:
 
 
 ## The stronghold's arsenal evolves with the campaign: MGs from level 1,
-## missiles from 4, flak batteries from 13, smoke screens from 18. Newly
-## unlocked tiers get one guaranteed emplacement so the change is visible.
+## missiles from 4, flak batteries from 13. Newly unlocked tiers get one
+## guaranteed emplacement so the change is visible.
 func _pick_tower_weapon(index: int) -> Tower.Weapon:
-	var guaranteed: Array = []
-	if level >= GameConfig.SMOKE_TOWER_UNLOCK_LEVEL:
-		guaranteed.append(Tower.Weapon.SMOKE)
-	if level >= GameConfig.FLAK_TOWER_UNLOCK_LEVEL:
-		guaranteed.append(Tower.Weapon.FLAK)
-	if index < guaranteed.size():
-		return guaranteed[index]
+	if level >= GameConfig.FLAK_TOWER_UNLOCK_LEVEL and index == 0:
+		return Tower.Weapon.FLAK
 	var roll := randf()
 	if level >= GameConfig.FLAK_TOWER_UNLOCK_LEVEL and roll < 0.2:
 		return Tower.Weapon.FLAK

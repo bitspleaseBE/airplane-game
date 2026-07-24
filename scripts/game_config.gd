@@ -50,17 +50,12 @@ const CARPET_SPEED_MULT := 0.9
 ## Stronghold evolution — staggered so no level introduces two new things.
 const MISSILE_TOWER_UNLOCK_LEVEL := 4
 const FLAK_TOWER_UNLOCK_LEVEL := 13
-const SMOKE_TOWER_UNLOCK_LEVEL := 18
 
 ## Flak battery: shell bursts at the plane's predicted spot, hits everything nearby.
 const FLAK_RANGE := 300.0
 const FLAK_COOLDOWN := 2.4
 const FLAK_SHELL_SPEED := 320.0
 const FLAK_BURST_RADIUS := 60.0
-
-## Smoke screen: no gun — planes inside the haze slow down and eat more fire.
-const SMOKE_FIELD_RADIUS := 130.0
-const SMOKE_SLOW_FACTOR := 0.55
 
 const SQUADRON_BASE := 40
 const SQUADRON_PER_LEVEL := 3
