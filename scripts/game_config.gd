@@ -34,8 +34,9 @@ const GUNSHIP_SHOT_INTERVAL := 0.16
 const GUNSHIP_SHOT_JITTER := 36.0
 
 ## Strike jet (levels 11–15): fires a guided missile from standoff, then banks away.
-const STRIKE_STANDOFF := 330.0
-const STRIKE_MISSILE_DAMAGE := 22
+## Standoff sits deep inside AA range (360) so the run in and out is still a gamble.
+const STRIKE_STANDOFF := 160.0
+const STRIKE_MISSILE_DAMAGE := 20
 const STRIKE_MISSILE_SPEED := 300.0
 const STRIKE_MISSILE_TURN_RATE := 4.5
 const STRIKE_SPEED_MULT := 1.15
