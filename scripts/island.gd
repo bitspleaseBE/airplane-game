@@ -129,6 +129,24 @@ func apply_bomb_at(pos: Vector2, damage: int) -> void:
 				tower.take_damage(GameConfig.TOWER_BOMB_DAMAGE)
 
 
+## Point damage from a gunship strafe — hits whatever sits under the impact.
+func apply_gunfire_at(pos: Vector2, damage: int) -> void:
+	if keep and is_instance_valid(keep) and keep.hp > 0:
+		if pos.distance_to(keep.global_position) <= GameConfig.KEEP_RADIUS * 0.9:
+			keep.take_damage(damage)
+			return
+	for turret in turrets_root.get_children():
+		if turret is Turret and is_instance_valid(turret) and not turret.is_destroyed():
+			if pos.distance_to(turret.global_position) <= 34.0:
+				turret.take_damage(damage)
+				return
+	for tower in towers_root.get_children():
+		if tower is Tower and is_instance_valid(tower) and not tower.is_destroyed():
+			if pos.distance_to(tower.global_position) <= 32.0:
+				tower.take_damage(damage)
+				return
+
+
 func _clear_children(node: Node) -> void:
 	while node.get_child_count() > 0:
 		var c := node.get_child(0)
@@ -221,14 +239,30 @@ func _scatter_towers() -> void:
 		var tower: Tower = _tower_scene.instantiate()
 		towers_root.add_child(tower)
 		tower.position = pos
-		var weapon: Tower.Weapon = (
-			Tower.Weapon.MACHINE_GUN if randf() < 0.55 else Tower.Weapon.MISSILE
-		)
-		tower.configure(_main, weapon)
+		tower.configure(_main, _pick_tower_weapon(_tower_positions.size() - 1))
 		tower.destroyed.connect(func(pos2: Vector2) -> void:
 			if _main and _main.has_method("_spawn_explosion"):
 				_main._spawn_explosion(pos2, 1.2, _main.Boom.BOMB)
 		)
+
+
+## The stronghold's arsenal evolves with the campaign: MGs from level 1,
+## missiles from 4, flak batteries from 13, smoke screens from 18. Newly
+## unlocked tiers get one guaranteed emplacement so the change is visible.
+func _pick_tower_weapon(index: int) -> Tower.Weapon:
+	var guaranteed: Array = []
+	if level >= GameConfig.SMOKE_TOWER_UNLOCK_LEVEL:
+		guaranteed.append(Tower.Weapon.SMOKE)
+	if level >= GameConfig.FLAK_TOWER_UNLOCK_LEVEL:
+		guaranteed.append(Tower.Weapon.FLAK)
+	if index < guaranteed.size():
+		return guaranteed[index]
+	var roll := randf()
+	if level >= GameConfig.FLAK_TOWER_UNLOCK_LEVEL and roll < 0.2:
+		return Tower.Weapon.FLAK
+	if level >= GameConfig.MISSILE_TOWER_UNLOCK_LEVEL and roll < 0.45:
+		return Tower.Weapon.MISSILE
+	return Tower.Weapon.MACHINE_GUN
 
 
 func _scatter_trees() -> void:

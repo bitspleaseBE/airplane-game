@@ -25,6 +25,7 @@ const BOMB_DB := -24.0
 const BIG_BOOM_DB := -20.0
 const BIG_CRUNCH_DB := -26.0
 const CRASH_DB := -28.0
+const GUN_HIT_DB := -32.0
 
 
 static func bomb(host: Node) -> void:
@@ -38,6 +39,11 @@ static func big_boom(host: Node) -> void:
 
 static func plane_crash(host: Node) -> void:
 	_play(host, _SOFT.pick_random(), CRASH_DB, randf_range(0.95, 1.15))
+
+
+## Quick strafe impact tick — quiet, high pitch, so bursts don't drown the mix.
+static func gun_hit(host: Node) -> void:
+	_play(host, _SOFT.pick_random(), GUN_HIT_DB, randf_range(1.25, 1.45))
 
 
 ## Soft looping beach / birds bed under the siege.

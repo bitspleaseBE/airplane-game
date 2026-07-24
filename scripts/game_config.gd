@@ -4,6 +4,63 @@ extends Node
 
 const LEVEL_COUNT := 20
 
+## Airframes are bound to level bands — you earn a new wing as the campaign advances.
+enum PlaneType { GUNSHIP, BOMBER, STRIKE, CARPET }
+
+const PLANE_TYPE_NAMES := {
+	PlaneType.GUNSHIP: "GUNSHIP",
+	PlaneType.BOMBER: "BOMBER",
+	PlaneType.STRIKE: "STRIKE",
+	PlaneType.CARPET: "CARPET",
+}
+
+## Sprite tint per airframe so the wing reads at a glance.
+const PLANE_TYPE_TINTS := {
+	PlaneType.GUNSHIP: Color(0.72, 0.86, 0.58),
+	PlaneType.BOMBER: Color(1.0, 1.0, 1.0),
+	PlaneType.STRIKE: Color(0.62, 0.78, 1.0),
+	PlaneType.CARPET: Color(1.0, 0.6, 0.48),
+}
+
+const GUNSHIP_MAX_LEVEL := 5
+const BOMBER_MAX_LEVEL := 10
+const STRIKE_MAX_LEVEL := 15
+
+## Gunship (levels 1–5): strafes the fort with its nose gun on approach.
+const GUNSHIP_STRAFE_RANGE := 250.0
+const GUNSHIP_SHOT_COUNT := 5
+const GUNSHIP_SHOT_DAMAGE := 4  # 5 × 4 = 20, same payload as one bomb
+const GUNSHIP_SHOT_INTERVAL := 0.16
+const GUNSHIP_SHOT_JITTER := 36.0
+
+## Strike jet (levels 11–15): fires a guided missile from standoff, then banks away.
+const STRIKE_STANDOFF := 330.0
+const STRIKE_MISSILE_DAMAGE := 22
+const STRIKE_MISSILE_SPEED := 300.0
+const STRIKE_MISSILE_TURN_RATE := 4.5
+const STRIKE_SPEED_MULT := 1.15
+
+## Carpet bomber (levels 16–20): one plane lays 3 bombs in a line across the fort.
+const CARPET_BOMB_COUNT := 3
+const CARPET_BOMB_DAMAGE := 10
+const CARPET_BOMB_INTERVAL := 0.22
+const CARPET_SPEED_MULT := 0.9
+
+## Stronghold evolution — staggered so no level introduces two new things.
+const MISSILE_TOWER_UNLOCK_LEVEL := 4
+const FLAK_TOWER_UNLOCK_LEVEL := 13
+const SMOKE_TOWER_UNLOCK_LEVEL := 18
+
+## Flak battery: shell bursts at the plane's predicted spot, hits everything nearby.
+const FLAK_RANGE := 300.0
+const FLAK_COOLDOWN := 2.4
+const FLAK_SHELL_SPEED := 320.0
+const FLAK_BURST_RADIUS := 60.0
+
+## Smoke screen: no gun — planes inside the haze slow down and eat more fire.
+const SMOKE_FIELD_RADIUS := 130.0
+const SMOKE_SLOW_FACTOR := 0.55
+
 const SQUADRON_BASE := 40
 const SQUADRON_PER_LEVEL := 3
 ## Alias for level-1 squadron (playtest / HUD defaults).
@@ -59,6 +116,21 @@ func level_t(level: int) -> float:
 
 func squadron_for_level(level: int) -> int:
 	return SQUADRON_BASE + (clampi(level, 1, LEVEL_COUNT) - 1) * SQUADRON_PER_LEVEL
+
+
+func plane_type_for_level(level: int) -> PlaneType:
+	var n := clampi(level, 1, LEVEL_COUNT)
+	if n <= GUNSHIP_MAX_LEVEL:
+		return PlaneType.GUNSHIP
+	if n <= BOMBER_MAX_LEVEL:
+		return PlaneType.BOMBER
+	if n <= STRIKE_MAX_LEVEL:
+		return PlaneType.STRIKE
+	return PlaneType.CARPET
+
+
+func plane_name_for_level(level: int) -> String:
+	return PLANE_TYPE_NAMES[plane_type_for_level(level)]
 
 
 func island_radius_for_level(level: int) -> float:

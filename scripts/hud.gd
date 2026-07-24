@@ -6,15 +6,36 @@ const SETTINGS_PATH := "user://settings.cfg"
 const _SPEAKER_ON: Texture2D = preload("res://assets/ui/speaker_on.png")
 const _SPEAKER_OFF: Texture2D = preload("res://assets/ui/speaker_off.png")
 
+## Radio-chatter callouts when a new airframe or bastion defense comes online.
+const _UNLOCK_TOASTS := {
+	4: "BASTION UPGRADE: MISSILE BATTERIES\nHeads on a swivel, ace.",
+	6: "NEW AIRFRAME: BOMBER WING\nOne big egg, right on the keep.",
+	11: "NEW AIRFRAME: STRIKE WING\nFire and forget from way out.",
+	13: "BASTION UPGRADE: FLAK GUNS\nThe sky just grew teeth.",
+	16: "NEW AIRFRAME: CARPET WING\nThree eggs a pass. Flatten it.",
+	18: "BASTION UPGRADE: SMOKE SCREENS\nThey're hiding in the haze.",
+}
+
+const _WING_HINTS := {
+	GameConfig.PlaneType.GUNSHIP: "Tap the water, ace —\nscramble the gunships",
+	GameConfig.PlaneType.BOMBER: "Tap the water, ace —\nscramble the bombers",
+	GameConfig.PlaneType.STRIKE: "Tap the water, ace —\nloose the strike jets",
+	GameConfig.PlaneType.CARPET: "Tap the water, ace —\nroll the carpet bombers",
+}
+
 var _main: Node2D
 var _sound_on: bool = true
 var _campaign_complete: bool = false
+var _last_level: int = 0
+var _toast_tween: Tween
 
 @onready var squadron_label: Label = $Root/TopBar/SquadronLabel
 @onready var keep_label: Label = $Root/TopBar/KeepLabel
 @onready var keep_bar: ProgressBar = $Root/TopBar/KeepBar
 @onready var sound_button: Button = $Root/TopBar/SoundButton
 @onready var level_label: Label = $Root/LevelLabel
+@onready var wing_label: Label = $Root/WingLabel
+@onready var toast_label: Label = $Root/ToastLabel
 @onready var hint_label: Label = $Root/HintLabel
 @onready var overlay: ColorRect = $Root/Overlay
 @onready var stars_label: Label = $Root/Overlay/StarsLabel
@@ -62,6 +83,27 @@ func _on_keep_hp(current: int, maximum: int) -> void:
 
 func _on_level(level: int) -> void:
 	level_label.text = "Bastion %d / %d" % [level, GameConfig.LEVEL_COUNT]
+	var wing_type: GameConfig.PlaneType = GameConfig.plane_type_for_level(level)
+	wing_label.text = "%s WING" % GameConfig.plane_name_for_level(level)
+	var tint: Color = GameConfig.PLANE_TYPE_TINTS[wing_type]
+	wing_label.add_theme_color_override("font_color", Color(tint.r, tint.g, tint.b, 0.95))
+	hint_label.text = _WING_HINTS[wing_type]
+	if level != _last_level and _UNLOCK_TOASTS.has(level):
+		_show_toast(_UNLOCK_TOASTS[level])
+	_last_level = level
+
+
+func _show_toast(message: String) -> void:
+	if _toast_tween and _toast_tween.is_valid():
+		_toast_tween.kill()
+	toast_label.text = message
+	toast_label.visible = true
+	toast_label.modulate = Color(1, 1, 1, 0)
+	_toast_tween = create_tween()
+	_toast_tween.tween_property(toast_label, "modulate:a", 1.0, 0.35)
+	_toast_tween.tween_interval(3.2)
+	_toast_tween.tween_property(toast_label, "modulate:a", 0.0, 0.6)
+	_toast_tween.tween_callback(func() -> void: toast_label.visible = false)
 
 
 func _on_won(stars: int = 3, campaign_complete: bool = false) -> void:

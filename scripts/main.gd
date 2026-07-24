@@ -25,6 +25,7 @@ var _islands: Array[Island] = []
 var _active_island: Island
 var _last_keep_max_hp: int = GameConfig.KEEP_MAX_HP
 var _last_gun_count: int = 0
+var _pending_ordnance: int = 0
 
 const HOLD_SPAWN_INTERVAL := 0.15
 
@@ -39,6 +40,7 @@ const HOLD_SPAWN_INTERVAL := 0.15
 var _plane_scene: PackedScene = preload("res://scenes/plane.tscn")
 var _explosion_scene: PackedScene = preload("res://scenes/explosion.tscn")
 var _island_scene: PackedScene = preload("res://scenes/island.tscn")
+var _strike_missile_scene: PackedScene = preload("res://scenes/strike_missile.tscn")
 
 enum Boom { BOMB, CRASH, BIG }
 
@@ -166,14 +168,19 @@ func _try_spawn(world_pos: Vector2) -> void:
 
 	var plane: PlaneUnit = _plane_scene.instantiate()
 	planes.add_child(plane)
-	plane.setup(world_pos, center, self)
+	plane.setup(world_pos, center, self, GameConfig.plane_type_for_level(current_level))
 	plane.finished.connect(_on_plane_finished)
 	plane.exploded.connect(func(pos: Vector2) -> void: _spawn_explosion(pos, 1.0, Boom.CRASH))
 
 
 func _on_plane_finished(_delivered_bomb: bool) -> void:
 	active_planes = max(active_planes - 1, 0)
-	if state == State.PLAYING and planes_remaining <= 0 and active_planes <= 0:
+	_check_squadron_spent()
+
+
+func _check_squadron_spent() -> void:
+	# Don't call the siege while strike missiles are still in the air.
+	if state == State.PLAYING and planes_remaining <= 0 and active_planes <= 0 and _pending_ordnance <= 0:
 		if keep and keep.hp > 0:
 			_set_lost()
 
@@ -209,6 +216,69 @@ func apply_bomb_at(pos: Vector2, damage: int) -> void:
 	_spawn_explosion(pos, 1.0, Boom.BOMB)
 	if _active_island:
 		_active_island.apply_bomb_at(pos, damage)
+
+
+## Gunship strafe: tracer flash + point damage on whatever is under the impact.
+func apply_gunfire(from_pos: Vector2, impact_pos: Vector2, damage: int) -> void:
+	_spawn_tracer(from_pos, impact_pos)
+	Sfx.gun_hit(self)
+	if _active_island:
+		_active_island.apply_gunfire_at(impact_pos, damage)
+
+
+func launch_strike_missile(pos: Vector2, angle: float, target_pos: Vector2) -> void:
+	var missile: StrikeMissile = _strike_missile_scene.instantiate()
+	bullets.add_child(missile)
+	missile.setup(pos, angle, target_pos, self)
+	_pending_ordnance += 1
+
+
+func ordnance_resolved() -> void:
+	_pending_ordnance = max(_pending_ordnance - 1, 0)
+	_check_squadron_spent()
+
+
+## Dark airburst puff cloud where a flak shell detonates.
+func spawn_flak_burst(pos: Vector2) -> void:
+	Sfx.bomb(self)
+	for i in 4:
+		var puff := Sprite2D.new()
+		var idx := randi_range(0, 12)
+		var path := "res://assets/effects/smoke/smoke_%02d.png" % idx
+		if ResourceLoader.exists(path):
+			puff.texture = load(path)
+		puff.global_position = pos + Vector2.from_angle(randf() * TAU) * randf_range(0.0, 24.0)
+		puff.scale = Vector2(0.14, 0.14)
+		puff.modulate = Color(0.25, 0.23, 0.26, 0.85)
+		puff.z_index = 14
+		effects.add_child(puff)
+		var tw := puff.create_tween()
+		tw.tween_property(puff, "modulate:a", 0.0, 0.7)
+		tw.parallel().tween_property(puff, "scale", Vector2(0.3, 0.3), 0.7)
+		tw.tween_callback(puff.queue_free)
+
+
+func _spawn_tracer(from_pos: Vector2, impact_pos: Vector2) -> void:
+	var line := Line2D.new()
+	line.points = PackedVector2Array([from_pos, impact_pos])
+	line.width = 3.0
+	line.default_color = Color(1.0, 0.9, 0.45, 0.9)
+	line.z_index = 14
+	effects.add_child(line)
+	var spark := Sprite2D.new()
+	spark.texture = preload("res://assets/projectiles/bullet.png")
+	spark.global_position = impact_pos
+	spark.scale = Vector2(0.5, 0.5)
+	spark.modulate = Color(1.0, 0.85, 0.4, 0.95)
+	spark.z_index = 14
+	effects.add_child(spark)
+	var tw := line.create_tween()
+	tw.tween_property(line, "modulate:a", 0.0, 0.12)
+	tw.tween_callback(line.queue_free)
+	var tw2 := spark.create_tween()
+	tw2.tween_property(spark, "scale", Vector2(1.1, 1.1), 0.14)
+	tw2.parallel().tween_property(spark, "modulate:a", 0.0, 0.14)
+	tw2.tween_callback(spark.queue_free)
 
 
 func register_bullet(bullet: Node2D) -> void:
@@ -372,6 +442,7 @@ func _clear_combatants() -> void:
 	for b in bullets.get_children():
 		b.queue_free()
 	active_planes = 0
+	_pending_ordnance = 0
 
 
 func _apply_open_ocean() -> void:

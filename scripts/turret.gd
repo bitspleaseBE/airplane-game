@@ -10,6 +10,7 @@ signal destroyed(pos: Vector2)
 const BARREL_ART_OFFSET := PI * 0.5
 const BLOCKED_HALF_ANGLE := PI * 0.25  # ±45° around keep = 90° forbidden wedge
 const ARC_SPAN := PI * 1.5  # 270° allowed
+const PAD_COLOR := Color(0.85, 0.28, 0.28)
 
 var max_hp: int = GameConfig.TURRET_MAX_HP
 var hp: int = GameConfig.TURRET_MAX_HP
@@ -43,6 +44,12 @@ func _ready() -> void:
 	add_to_group("turrets")
 	hp = max_hp
 	_update_hp_bar()
+
+
+## Red pad ring: marks this as the keep's own AA battery.
+func _draw() -> void:
+	draw_circle(Vector2.ZERO, 27.0, Color(PAD_COLOR.r, PAD_COLOR.g, PAD_COLOR.b, 0.22))
+	draw_arc(Vector2.ZERO, 27.0, 0.0, TAU, 40, Color(PAD_COLOR.r, PAD_COLOR.g, PAD_COLOR.b, 0.8), 3.0)
 
 
 func _process(delta: float) -> void:
