@@ -27,8 +27,6 @@ var _last_keep_max_hp: int = GameConfig.KEEP_MAX_HP
 var _last_gun_count: int = 0
 var _pending_ordnance: int = 0
 
-const HOLD_SPAWN_INTERVAL := 0.15
-
 @onready var camera: Camera2D = $Camera
 @onready var islands_root: Node2D = $Islands
 @onready var planes: Node2D = $Planes
@@ -163,14 +161,15 @@ func _try_spawn(world_pos: Vector2) -> void:
 	if dist > water_min + 220.0:
 		return
 
-	_spawn_cooldown = HOLD_SPAWN_INTERVAL
+	var plane_type: GameConfig.PlaneType = GameConfig.plane_type_for_level(current_level)
+	_spawn_cooldown = GameConfig.deploy_interval_for_plane(plane_type)
 	planes_remaining -= 1
 	active_planes += 1
 	_emit_hud()
 
 	var plane: PlaneUnit = _plane_scene.instantiate()
 	planes.add_child(plane)
-	plane.setup(world_pos, center, self, GameConfig.plane_type_for_level(current_level))
+	plane.setup(world_pos, center, self, plane_type)
 	plane.finished.connect(_on_plane_finished)
 	plane.exploded.connect(func(pos: Vector2) -> void: _spawn_explosion(pos, 1.0, Boom.CRASH))
 
@@ -182,9 +181,22 @@ func _on_plane_finished(_delivered_bomb: bool) -> void:
 
 func _check_squadron_spent() -> void:
 	# Don't call the siege while strike missiles are still in the air.
-	if state == State.PLAYING and planes_remaining <= 0 and active_planes <= 0 and _pending_ordnance <= 0:
-		if keep and keep.hp > 0:
-			_set_lost()
+	# Count live plane nodes too — counters alone can desync if finished
+	# double-fires or a plane is freed without the signal.
+	if state != State.PLAYING or planes_remaining > 0 or _pending_ordnance > 0:
+		return
+	if active_planes > 0 or _living_plane_count() > 0:
+		return
+	if keep and keep.hp > 0:
+		_set_lost()
+
+
+func _living_plane_count() -> int:
+	var n := 0
+	for p in planes.get_children():
+		if is_instance_valid(p) and not p.is_queued_for_deletion():
+			n += 1
+	return n
 
 
 func _on_keep_hp_changed(current: int, maximum: int) -> void:

@@ -14,6 +14,8 @@ extends Node
 ##   --strategy=NAME       spread (default) | blitz | waves — see _deploy_delay
 ##   --seed=N              fixed RNG seed for reproducible runs
 ##   --level=N             forwarded to the game via main.set_level(N) if it exists
+##   --briefing            force the first-play mission briefing on screen
+##   --force-lose          after the start shot, fire the lose overlay (HUD UI check)
 
 const WAVE_SIZE := 5
 
@@ -25,6 +27,8 @@ var _shot_interval := 3.0
 var _strategy := "spread"
 var _level := 1
 var _rng_seed := -1
+var _force_briefing := false
+var _force_lose := false
 
 var _main: Node2D
 var _result := "timeout"
@@ -62,6 +66,12 @@ func _ready() -> void:
 			_rng_seed = int(arg.trim_prefix("--seed="))
 		elif arg.begins_with("--level="):
 			_level = int(arg.trim_prefix("--level="))
+		elif arg == "--briefing":
+			_force_briefing = true
+		elif arg == "--force-lose":
+			_force_lose = true
+			_planes_to_spawn = 0
+			_duration = mini(_duration, 4.0)
 	if _rng_seed >= 0:
 		seed(_rng_seed)
 	DirAccess.make_dir_recursive_absolute(_abs_out())
@@ -97,10 +107,24 @@ func _run() -> void:
 	if _planes_all and "squadron_size" in _main:
 		_planes_to_spawn = int(_main.squadron_size)
 
+	if _force_briefing:
+		var hud := _main.get_node_or_null("HUD")
+		if hud and hud.has_method("force_briefing"):
+			hud.force_briefing()
+			# Let the pop-in tween settle before the first shot.
+			await get_tree().create_timer(0.7).timeout
+
 	await _screenshot("start")
+
+	if _force_lose and _main.has_method("_set_lost"):
+		_main._set_lost()
+		await get_tree().create_timer(0.5).timeout
 
 	var next_shot := _shot_interval
 	while _elapsed() < _duration and _result == "timeout":
+		if _force_lose:
+			await get_tree().process_frame
+			continue
 		if _deployed < _planes_to_spawn:
 			if await _deploy_bomber(_deployed):
 				_deployed += 1
@@ -173,13 +197,15 @@ func _deploy_angle(i: int) -> float:
 
 
 func _deploy_delay(i: int) -> float:
+	# Stay just above the level's deploy gap so taps aren't eaten by cooldown.
+	var scramble: float = GameConfig.deploy_interval_for_level(_level) + 0.05
 	match _strategy:
 		"blitz":
-			return 0.55  # Just above the game's spawn cooldown = max rate.
+			return scramble
 		"waves":
-			return 4.0 if i % WAVE_SIZE == 0 else 0.55
+			return 4.0 if i % WAVE_SIZE == 0 else scramble
 		_:
-			return 1.2
+			return maxf(1.2, scramble)
 
 
 ## Synthesize a screen touch through the real input pipeline.

@@ -58,7 +58,7 @@ top**. Confident swagger, radio-chatter punch, never grim, never corporate.
 **Do:**
 - "BASTION DOWN. Nothing left but smoke and glory."
 - "Squadron's spent and that keep's still smug. Unacceptable, pilot."
-- "Tap the water, ace — scramble the bombers."
+- "Tap the water, commander — scramble the bombers."
 
 **Don't:**
 - "You win!" / "Game over" (flat)

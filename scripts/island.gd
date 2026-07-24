@@ -34,13 +34,15 @@ var _rng := RandomNumberGenerator.new()
 var _sand_lut: PackedFloat32Array = PackedFloat32Array()
 var _grass_lut: PackedFloat32Array = PackedFloat32Array()
 var _islets: Array = []
+## Soft turquoise sandbar / reef blobs that touch the coastal shelf.
+var _shallow_lobes: Array = []
 var _tower_positions: Array[Vector2] = []
 var _turret_positions: Array[Vector2] = []
 var _grass_min_radius: float = GRASS_MIN_RADIUS_BASE
 var _coast_shape: CoastShape = CoastShape.ROUND
 var _base_sprite: Sprite2D
-var _hires_thread: Thread
 var _hires_done := false
+var _hires_baking := false
 
 var _keep_scene: PackedScene = preload("res://scenes/keep.tscn")
 var _turret_scene: PackedScene = preload("res://scenes/turret.tscn")
@@ -68,6 +70,7 @@ func build(level_num: int, main_ref: Node2D) -> void:
 
 	_generate_island_shape()
 	_hires_done = false
+	_hires_baking = false
 	_base_sprite = Sprite2D.new()
 	_base_sprite.texture = ImageTexture.create_from_image(_render_island_image(ISLAND_IMG_SCALE))
 	_base_sprite.position = Vector2.ZERO
@@ -94,9 +97,12 @@ func reset_for_retry() -> void:
 
 func set_active(on: bool) -> void:
 	active = on
-	if on and not _hires_done and _hires_thread == null:
-		_hires_thread = Thread.new()
-		_hires_thread.start(_hires_render_worker)
+	# Bake the crisp texture on the main thread next idle frame.
+	# A worker Thread calling into this Node was crashing mid-campaign
+	# (Godot scene APIs are not thread-safe) — felt like a random restart.
+	if on and not _hires_done and not _hires_baking:
+		_hires_baking = true
+		_bake_hires.call_deferred()
 	if keep:
 		keep.set_process(on)
 		if keep.hp_bar:
@@ -361,7 +367,6 @@ func _scatter_trees() -> void:
 
 	# Longer sand shelves get denser palm lines; short beaches stay sparse.
 	var long_beach_slots: Array[float] = []
-	var beach_len_est := 0.0
 	for i in ISLAND_LUT_SIZE:
 		var theta := TAU * float(i) / float(ISLAND_LUT_SIZE)
 		var sand_r := _sand_lut[i]
@@ -369,13 +374,8 @@ func _scatter_trees() -> void:
 		var shelf := sand_r - grass_r
 		if shelf > 55.0:
 			long_beach_slots.append(theta)
-			beach_len_est += shelf
-	# A handful of shoreline palms, a few more where beaches run long.
-	var base_count := _rng.randi_range(3, 5)
-	if GameConfig.is_stronghold_level(level):
-		base_count += _rng.randi_range(2, 4)
-	var beach_bonus := clampi(int(beach_len_est / 400.0), 0, 6)
-	var count := mini(base_count + beach_bonus, 10)
+	# Uniform 0–10 palms; placement still prefers long beaches when present.
+	var count := _rng.randi_range(0, 10)
 
 	var attempts := 0
 	while placed.size() < count and attempts < 500:
@@ -508,6 +508,7 @@ func _generate_island_shape() -> void:
 	for i in ISLAND_LUT_SIZE:
 		_sand_lut[i] = maxf(_sand_lut[i], _grass_lut[i] + 30.0)
 
+	_islets.clear()
 	var want_islets := _coast_shape == CoastShape.LOBED or _coast_shape == CoastShape.PENINSULA or _rng.randf() < 0.4
 	if want_islets:
 		var islet_n := _rng.randi_range(1, 3) if _coast_shape == CoastShape.LOBED else _rng.randi_range(1, 2)
@@ -521,6 +522,17 @@ func _generate_island_shape() -> void:
 			if hi <= lo:
 				continue
 			_islets.append([Vector2.from_angle(ang) * _rng.randf_range(lo, hi), islet_r])
+
+	# Shallow lobes: irregular turquoise patches that connect to the shelf
+	# instead of tracing the sand rim 1:1.
+	_shallow_lobes.clear()
+	var lobe_n := _rng.randi_range(4, 7)
+	for i in lobe_n:
+		var ang := axis + TAU * float(i) / float(lobe_n) + _rng.randf_range(-0.7, 0.7)
+		var sand_r := _lut_at(_sand_lut, ang)
+		var lobe_r := _rng.randf_range(32.0, 70.0)
+		var d := sand_r + _rng.randf_range(2.0, 34.0)
+		_shallow_lobes.append([Vector2.from_angle(ang) * d, lobe_r])
 
 
 ## Writes a 0.55–1.25 radius multiplier and a 0–1 beach-width boost per LUT sample.
@@ -597,29 +609,20 @@ func _lut_at(lut: PackedFloat32Array, theta: float) -> float:
 	return lerpf(lut[i], lut[(i + 1) % ISLAND_LUT_SIZE], t - float(i))
 
 
-func _hires_render_worker() -> void:
+func _bake_hires() -> void:
+	_hires_baking = false
+	if _hires_done or not is_instance_valid(self):
+		return
 	var img := _render_island_image(ISLAND_IMG_SCALE_ACTIVE)
-	_apply_hires_texture.call_deferred(img)
-
-
-func _apply_hires_texture(img: Image) -> void:
-	if _hires_thread:
-		_hires_thread.wait_to_finish()
-		_hires_thread = null
 	_hires_done = true
 	if _base_sprite and is_instance_valid(_base_sprite):
 		_base_sprite.texture = ImageTexture.create_from_image(img)
 		_base_sprite.scale = Vector2.ONE * ISLAND_IMG_SCALE_ACTIVE
 
 
-func _exit_tree() -> void:
-	if _hires_thread:
-		_hires_thread.wait_to_finish()
-		_hires_thread = null
-
-
 func _render_island_image(img_scale: float) -> Image:
-	var pad := 26.0
+	# Pad covers irregular shallow lobes / sandbars past the sand rim.
+	var pad := 110.0
 	var size := int(ceil((island_radius + pad) * 2.0 / img_scale))
 	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
 	var c := size * 0.5
@@ -639,35 +642,70 @@ func _render_island_image(img_scale: float) -> Image:
 			for islet in _islets:
 				var islet_dist: float = p.distance_to(islet[0])
 				var islet_r: float = islet[1]
-				if islet_dist > islet_r + 26.0:
+				if islet_dist > islet_r + 78.0:
 					continue
 				var islet_grass := islet_r * 0.55 if islet_r > 15.0 else 0.0
 				var icol := _shade_island(p, islet_dist, islet_r, islet_grass, tex_noise)
 				if icol.a > col.a:
 					col = icol
+			# Connected sandbar / reef spots — soft turquoise blobs off the rim.
+			var sand_here := _lut_at(_sand_lut, theta)
+			if dist >= sand_here - 1.0:
+				for lobe in _shallow_lobes:
+					var ld: float = p.distance_to(lobe[0])
+					var lr: float = lobe[1]
+					if ld > lr:
+						continue
+					var la := (1.0 - smoothstep(lr * 0.15, lr, ld)) * 0.72
+					la *= 0.65 + 0.35 * tex_noise.get_noise_2d(p.x * 0.1 + 50.0, p.y * 0.1)
+					if la <= 0.004:
+						continue
+					var sc := Color(0.60, 0.90, 0.88).lerp(Color(0.80, 0.97, 0.95), 1.0 - ld / lr)
+					var a := maxf(col.a, la)
+					var t := la / maxf(a, 0.001)
+					col = Color(
+						lerpf(col.r, sc.r, t),
+						lerpf(col.g, sc.g, t),
+						lerpf(col.b, sc.b, t),
+						a,
+					)
 			if col.a > 0.004:
 				img.set_pixel(x, y, col)
 	return img
 
 
 func _shade_island(p: Vector2, dist: float, sand_r: float, grass_r: float, noise: FastNoiseLite) -> Color:
-	var shallow_a := (1.0 - smoothstep(sand_r, sand_r + 22.0, dist)) * 0.4
+	# Irregular turquoise shelf — width varies, with connected bulges,
+	# so it doesn't read as a uniform coast-hugging ring.
+	var n_lo := noise.get_noise_2d(p.x * 0.038 + 120.0, p.y * 0.038)
+	var n_mid := noise.get_noise_2d(p.x * 0.078 + 880.0, p.y * 0.078)
+	var n_bar := noise.get_noise_2d(p.x * 0.05 + 300.0, p.y * 0.05)
+	# Always a readable base shelf; noise only warps how far it reaches.
+	var shelf_w := lerpf(16.0, 44.0, 0.5 + 0.5 * n_lo)
+	shelf_w += maxf(0.0, n_mid - 0.1) * 38.0
+	var bar := maxf(0.0, n_bar - 0.1)
+	shelf_w += bar * 55.0
+	shelf_w = clampf(shelf_w, 14.0, 85.0)
+	var shallow_a := (1.0 - smoothstep(sand_r, sand_r + shelf_w, dist)) * 0.7
+	# Mild mottling — never erase the shelf.
+	shallow_a *= lerpf(0.72, 1.0, clampf(0.5 + n_mid * 0.55 + bar * 0.3, 0.0, 1.0))
 	var land_a := 1.0 - smoothstep(sand_r - 2.0, sand_r + 2.0, dist)
 	if shallow_a <= 0.004 and land_a <= 0.004:
 		return Color(0, 0, 0, 0)
-	# Shallow water: brighter turquoise hugging the shore, fading seaward.
-	var near := 1.0 - smoothstep(sand_r, sand_r + 22.0, dist)
-	var out := Color(0.45, 0.78, 0.76).lerp(Color(0.62, 0.88, 0.84), near * 0.6)
+	var near := 1.0 - smoothstep(sand_r, sand_r + maxf(12.0, shelf_w * 0.5), dist)
+	var out := Color(0.62, 0.90, 0.88).lerp(Color(0.82, 0.97, 0.95), near * 0.85)
 	out.a = shallow_a
-	# Foam band hugging the waterline — width undulates so it reads as surf.
-	var foam_w := 12.0 + noise.get_noise_2d(p.x * 0.22 + 400.0, p.y * 0.22) * 6.0
-	var foam := (1.0 - smoothstep(0.0, foam_w, absf(dist - (sand_r + 1.0)))) * 0.85
+	# Foam: undulating surf, always present but uneven.
+	var foam_w := 11.0 + noise.get_noise_2d(p.x * 0.22 + 400.0, p.y * 0.22) * 6.0
+	var foam := (1.0 - smoothstep(0.0, foam_w, absf(dist - (sand_r + 1.0)))) * 0.75
+	var foam_patch := clampf(0.5 + noise.get_noise_2d(p.x * 0.11 + 510.0, p.y * 0.11) * 0.7, 0.35, 1.0)
+	foam *= foam_patch
 	if foam > 0.01:
 		out = Color(
 			lerpf(out.r, 0.98, foam),
 			lerpf(out.g, 0.99, foam),
 			lerpf(out.b, 0.96, foam),
-			maxf(out.a, foam * 0.9),
+			maxf(out.a, foam * 0.85),
 		)
 	if land_a > 0.004:
 		var dry := Color(0.94, 0.85, 0.60)

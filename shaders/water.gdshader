@@ -64,23 +64,30 @@ void fragment() {
 
 	if (open_ocean) {
 		// Distance to the nearest island coast drives the depth ramp:
-		// bright lagoon water hugging shores, deep blue in open sea.
+		// bright lagoon water near shores, deep blue in open sea.
+		// Noise warps the shelf so it isn't a perfect circle around each island.
 		float shore_d = 1e6;
 		for (int i = 0; i < island_count; i++) {
-			shore_d = min(shore_d, length(world_pos - island_centers[i]) - island_radii[i]);
+			vec2 delta = world_pos - island_centers[i];
+			float radial = length(delta) - island_radii[i];
+			float warp = (fbm(delta * 0.012 + vec2(float(i) * 17.0, 3.1)) - 0.5) * 90.0;
+			// Soft connected sandbar spots around each island.
+			float bars = max(fbm(delta * 0.018 + vec2(9.0, float(i) * 5.0)) - 0.55, 0.0) * 110.0;
+			shore_d = min(shore_d, radial + warp - bars);
 		}
 		shore_d = max(shore_d, 0.0);
-		float prox = 1.0 - smoothstep(0.0, 620.0, shore_d);
+		float prox = 1.0 - smoothstep(0.0, 520.0, shore_d);
 
 		float depth_n = fbm(world_pos * 0.0012 + vec2(2.1, 7.3));
 		float d_far = mix(100.0, 300.0, depth_n);
-		float d_near = mix(15.0, 85.0, depth_n);
+		// Keep open water a touch deeper near coasts so baked shelves pop.
+		float d_near = mix(35.0, 110.0, depth_n);
 		float d = mix(d_far, d_near, prox);
 
 		base = shallows_color.rgb;
-		base = mix(base, lagoon_color.rgb, smoothstep(20.0, 70.0, d));
-		base = mix(base, ocean_color.rgb, smoothstep(60.0, 140.0, d));
-		base = mix(base, deep_color.rgb, smoothstep(130.0, 260.0, d));
+		base = mix(base, lagoon_color.rgb, smoothstep(25.0, 80.0, d));
+		base = mix(base, ocean_color.rgb, smoothstep(70.0, 150.0, d));
+		base = mix(base, deep_color.rgb, smoothstep(140.0, 270.0, d));
 
 		float blot = fbm(world_pos * 0.0035 + TIME * 0.008) - 0.5;
 		base *= 1.0 + blot * 0.045;

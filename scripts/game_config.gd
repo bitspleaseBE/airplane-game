@@ -84,6 +84,14 @@ const PLANE_SPEED := 220.0
 const PLANE_BOMB_RADIUS := 70.0
 const PLANE_SCALE := 0.9
 
+## Hold-to-deploy gap between birds — lighter wings scramble faster.
+const PLANE_DEPLOY_INTERVALS := {
+	PlaneType.STRIKE: 0.35,
+	PlaneType.GUNSHIP: 0.45,
+	PlaneType.BOMBER: 0.55,
+	PlaneType.CARPET: 0.75,
+}
+
 const TURRET_RANGE := 360.0
 const TURRET_FIRE_COOLDOWN := 1.2
 ## From bastion 3 up, corner guns reach farther and cycle faster so blitz dies.
@@ -153,6 +161,14 @@ func plane_type_for_level(level: int) -> PlaneType:
 
 func plane_name_for_level(level: int) -> String:
 	return PLANE_TYPE_NAMES[plane_type_for_level(level)]
+
+
+func deploy_interval_for_plane(plane_type: PlaneType) -> float:
+	return PLANE_DEPLOY_INTERVALS.get(plane_type, PLANE_DEPLOY_INTERVALS[PlaneType.BOMBER])
+
+
+func deploy_interval_for_level(level: int) -> float:
+	return deploy_interval_for_plane(plane_type_for_level(level))
 
 
 func island_radius_for_level(level: int) -> float:

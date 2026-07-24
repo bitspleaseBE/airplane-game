@@ -1,4 +1,4 @@
-[gd_scene load_steps=10 format=3]
+[gd_scene load_steps=14 format=3]
 
 [ext_resource type="Script" path="res://scripts/hud.gd" id="1"]
 [ext_resource type="Texture2D" path="res://assets/ui/audio_on.png" id="2"]
@@ -6,6 +6,8 @@
 [ext_resource type="Texture2D" path="res://assets/ui/star_empty.png" id="4"]
 [ext_resource type="Texture2D" path="res://assets/ui/plane.png" id="5"]
 [ext_resource type="Texture2D" path="res://assets/ui/castle.png" id="6"]
+[ext_resource type="Shader" path="res://shaders/briefing_vignette.gdshader" id="7"]
+[ext_resource type="Script" path="res://scripts/briefing_tap_cue.gd" id="8"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_bar_bg"]
 bg_color = Color(0.12, 0.14, 0.16, 0.85)
@@ -64,6 +66,16 @@ content_margin_top = 8
 content_margin_right = 8
 content_margin_bottom = 8
 
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_briefing_vig"]
+shader = ExtResource("7")
+shader_parameter/center_color = Color(0.18, 0.11, 0.05, 0.06)
+shader_parameter/edge_color = Color(0.08, 0.04, 0.02, 0.76)
+shader_parameter/glow_color = Color(0.98, 0.74, 0.28, 0.22)
+shader_parameter/radius = 0.52
+shader_parameter/softness = 0.58
+shader_parameter/glow_band = 0.16
+shader_parameter/pulse = 0.0
+
 [node name="HUD" type="CanvasLayer"]
 layer = 10
 script = ExtResource("1")
@@ -78,6 +90,7 @@ grow_vertical = 2
 mouse_filter = 2
 
 [node name="TopBar" type="HBoxContainer" parent="Root"]
+z_index = 30
 layout_mode = 1
 anchors_preset = 10
 anchor_right = 1.0
@@ -109,6 +122,14 @@ size_flags_vertical = 4
 theme_override_colors/font_color = Color(0.95, 0.96, 0.92, 1)
 theme_override_font_sizes/font_size = 28
 text = "15"
+vertical_alignment = 1
+
+[node name="WingLabel" type="Label" parent="Root/TopBar/SquadronRow"]
+layout_mode = 2
+size_flags_vertical = 4
+theme_override_colors/font_color = Color(0.72, 0.86, 0.58, 0.95)
+theme_override_font_sizes/font_size = 18
+text = "GUNSHIP"
 vertical_alignment = 1
 
 [node name="CastleIcon" type="TextureRect" parent="Root/TopBar"]
@@ -145,6 +166,7 @@ expand_icon = true
 tooltip_text = "Sound on"
 
 [node name="Title" type="Label" parent="Root"]
+z_index = 30
 layout_mode = 1
 anchors_preset = 5
 anchor_left = 0.5
@@ -160,6 +182,7 @@ text = "BASTION BOMBER"
 horizontal_alignment = 1
 
 [node name="LevelLabel" type="Label" parent="Root"]
+z_index = 30
 layout_mode = 1
 anchors_preset = 5
 anchor_left = 0.5
@@ -172,21 +195,6 @@ grow_horizontal = 2
 theme_override_colors/font_color = Color(0.92, 0.94, 0.9, 0.85)
 theme_override_font_sizes/font_size = 20
 text = "Bastion 1 / 20"
-horizontal_alignment = 1
-
-[node name="WingLabel" type="Label" parent="Root"]
-layout_mode = 1
-anchors_preset = 5
-anchor_left = 0.5
-anchor_right = 0.5
-offset_left = -160.0
-offset_top = 172.0
-offset_right = 160.0
-offset_bottom = 200.0
-grow_horizontal = 2
-theme_override_colors/font_color = Color(0.72, 0.86, 0.58, 0.95)
-theme_override_font_sizes/font_size = 18
-text = "GUNSHIP WING"
 horizontal_alignment = 1
 
 [node name="ToastLabel" type="Label" parent="Root"]
@@ -226,7 +234,7 @@ grow_horizontal = 2
 grow_vertical = 0
 theme_override_colors/font_color = Color(0.92, 0.94, 0.9, 0.9)
 theme_override_font_sizes/font_size = 22
-text = "Tap the water, ace —
+text = "Tap the water, commander —
 scramble the bombers"
 horizontal_alignment = 1
 vertical_alignment = 1
@@ -245,7 +253,29 @@ theme_override_colors/font_color = Color(0.92, 0.94, 0.9, 0.55)
 theme_override_font_sizes/font_size = 16
 text = "v1.0.0 - Bomber"
 
-[node name="Overlay" type="ColorRect" parent="Root"]
+[node name="Overlay" type="Control" parent="Root"]
+visible = false
+z_index = 35
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+
+[node name="Vignette" type="ColorRect" parent="Root/Overlay"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+material = SubResource("ShaderMaterial_briefing_vig")
+color = Color(1, 1, 1, 1)
+
+[node name="Dim" type="ColorRect" parent="Root/Overlay"]
 visible = false
 layout_mode = 1
 anchors_preset = 15
@@ -253,22 +283,23 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-color = Color(0.05, 0.08, 0.1, 0.72)
+mouse_filter = 2
+color = Color(0.05, 0.15, 0.08, 0.72)
 
 [node name="StarsRow" type="HBoxContainer" parent="Root/Overlay"]
 visible = false
 layout_mode = 1
-anchors_preset = 8
+anchors_preset = 7
 anchor_left = 0.5
-anchor_top = 0.5
+anchor_top = 1.0
 anchor_right = 0.5
-anchor_bottom = 0.5
+anchor_bottom = 1.0
 offset_left = -110.0
-offset_top = -190.0
+offset_top = -340.0
 offset_right = 110.0
-offset_bottom = -118.0
+offset_bottom = -268.0
 grow_horizontal = 2
-grow_vertical = 2
+grow_vertical = 0
 theme_override_constants/separation = 14
 alignment = 1
 
@@ -295,37 +326,118 @@ stretch_mode = 5
 
 [node name="ResultLabel" type="Label" parent="Root/Overlay"]
 layout_mode = 1
-anchors_preset = 8
+anchors_preset = 7
 anchor_left = 0.5
-anchor_top = 0.5
+anchor_top = 1.0
 anchor_right = 0.5
-anchor_bottom = 0.5
-offset_left = -260.0
-offset_top = -110.0
-offset_right = 260.0
-offset_bottom = 30.0
+anchor_bottom = 1.0
+offset_left = -300.0
+offset_top = -250.0
+offset_right = 300.0
+offset_bottom = -150.0
 grow_horizontal = 2
-grow_vertical = 2
-theme_override_colors/font_color = Color(1, 1, 1, 1)
-theme_override_font_sizes/font_size = 36
+grow_vertical = 0
+theme_override_colors/font_color = Color(1, 0.93, 0.72, 0.95)
+theme_override_colors/font_outline_color = Color(0.12, 0.06, 0.02, 0.85)
+theme_override_constants/outline_size = 5
+theme_override_font_sizes/font_size = 32
 text = "Result"
 horizontal_alignment = 1
 vertical_alignment = 1
 
-[node name="RestartButton" type="Button" parent="Root/Overlay"]
+[node name="ActionRow" type="HBoxContainer" parent="Root/Overlay"]
 layout_mode = 1
-anchors_preset = 8
+anchors_preset = 7
 anchor_left = 0.5
-anchor_top = 0.5
+anchor_top = 1.0
 anchor_right = 0.5
-anchor_bottom = 0.5
-offset_left = -110.0
-offset_top = 56.0
-offset_right = 110.0
-offset_bottom = 116.0
+anchor_bottom = 1.0
+offset_left = -280.0
+offset_top = -132.0
+offset_right = 280.0
+offset_bottom = -60.0
 grow_horizontal = 2
-grow_vertical = 2
+grow_vertical = 0
+theme_override_constants/separation = 18
+alignment = 1
+
+[node name="RestartButton" type="Button" parent="Root/Overlay/ActionRow"]
+custom_minimum_size = Vector2(200, 64)
+layout_mode = 2
 theme_override_colors/font_color = Color(0.15, 0.12, 0.05, 1)
 theme_override_font_sizes/font_size = 24
 theme_override_styles/normal = SubResource("StyleBoxFlat_btn")
 text = "Try again"
+
+[node name="NewGameButton" type="Button" parent="Root/Overlay/ActionRow"]
+visible = false
+custom_minimum_size = Vector2(200, 64)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.15, 0.12, 0.05, 1)
+theme_override_font_sizes/font_size = 24
+theme_override_styles/normal = SubResource("StyleBoxFlat_btn")
+text = "Start over"
+
+[node name="Briefing" type="Control" parent="Root"]
+visible = false
+z_index = 40
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+
+[node name="Vignette" type="ColorRect" parent="Root/Briefing"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+material = SubResource("ShaderMaterial_briefing_vig")
+color = Color(1, 1, 1, 1)
+
+[node name="TapCue" type="Control" parent="Root/Briefing"]
+clip_contents = true
+layout_mode = 1
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -48.0
+offset_top = -295.0
+offset_right = 48.0
+offset_bottom = -200.0
+grow_horizontal = 2
+grow_vertical = 0
+mouse_filter = 2
+script = ExtResource("8")
+plane_tex = ExtResource("5")
+
+[node name="CueLabel" type="Label" parent="Root/Briefing"]
+layout_mode = 1
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -280.0
+offset_top = -172.0
+offset_right = 280.0
+offset_bottom = -100.0
+grow_horizontal = 2
+grow_vertical = 0
+mouse_filter = 2
+theme_override_colors/font_color = Color(1, 0.93, 0.72, 0.95)
+theme_override_colors/font_outline_color = Color(0.12, 0.06, 0.02, 0.85)
+theme_override_constants/outline_size = 5
+theme_override_constants/line_spacing = -10
+theme_override_font_sizes/font_size = 22
+text = "TAP THE OPEN WATER
+TO DEPLOY YOUR JETFIGHTERS"
+horizontal_alignment = 1
+vertical_alignment = 1

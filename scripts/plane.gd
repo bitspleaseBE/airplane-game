@@ -33,6 +33,7 @@ var _carpet_dir: Vector2 = Vector2.RIGHT
 var _bombs_left: int = GameConfig.CARPET_BOMB_COUNT
 var _bomb_timer: float = 0.0
 var _carpet_stick: int = 0
+var _done: bool = false
 
 @onready var sprite: Sprite2D = $Sprite
 @onready var shadow: Sprite2D = $Shadow
@@ -282,6 +283,12 @@ func _emit_smoke_puff() -> void:
 
 
 func _finish(delivered: bool) -> void:
+	# queue_free is deferred to end-of-frame; without this guard, exit/sizzle
+	# can emit finished again and under-count active_planes → false lose.
+	if _done:
+		return
+	_done = true
+	set_physics_process(false)
 	finished.emit(delivered)
 	queue_free()
 
