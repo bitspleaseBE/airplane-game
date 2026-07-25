@@ -75,6 +75,12 @@ It does **not** measure:
 - Phone thermal throttling or device-pixel (Retina) fill-rate
 - An iPhone 12 Pro (or any specific handset)
 
+Web/mobile use a separate **constrained quality** path (`GameConfig.water_quality
+= 0`, nearest-N shader islands, viewport upscale) that this native gate does
+not exercise. After changing `shaders/water.gdshader`, scenic density, or
+quality caps, verify on a phone browser (or desktop DevTools device mode) in
+addition to `tools/perf_check.sh`.
+
 For true mobile-browser numbers, export web and profile on device (or browser
 DevTools). Treat bake budgets as especially predictive for web freezes; treat
 frame-time gates as native proxies that still catch shader/gameplay regressions

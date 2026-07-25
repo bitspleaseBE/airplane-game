@@ -30,7 +30,6 @@ var _contrail_sample: float = 0.0
 var _contrail_pool: Array[Polygon2D] = []
 const CONTRAIL_LIFE := 0.5
 const CONTRAIL_SAMPLE := 0.03
-const CONTRAIL_MAX_POINTS := 16
 
 # Gunship strafing run
 var _shots_left: int = GameConfig.GUNSHIP_SHOT_COUNT
@@ -323,11 +322,13 @@ func _ensure_contrail() -> void:
 	_contrail_root.name = "Contrail"
 	parent.add_child(_contrail_root)
 	_contrail_pool.clear()
-	for _i in CONTRAIL_MAX_POINTS:
+	var disc_budget := GameConfig.contrail_max_points
+	var sides := 8 if GameConfig.is_constrained_quality() else 10
+	for _i in disc_budget:
 		var disc := Polygon2D.new()
 		var pts := PackedVector2Array()
-		for j in 10:
-			var a := TAU * float(j) / 10.0
+		for j in sides:
+			var a := TAU * float(j) / float(sides)
 			pts.append(Vector2(cos(a), sin(a)) * 5.0)
 		disc.polygon = pts
 		disc.visible = false
@@ -358,7 +359,7 @@ func _update_contrail(delta: float, growing: bool) -> void:
 			var tip := global_position + Vector2.LEFT.rotated(rotation) * 8.0
 			_contrail_points.insert(0, tip)
 			_contrail_ages.insert(0, 0.0)
-			while _contrail_points.size() > CONTRAIL_MAX_POINTS:
+			while _contrail_points.size() > GameConfig.contrail_max_points:
 				_contrail_points.remove_at(_contrail_points.size() - 1)
 				_contrail_ages.remove_at(_contrail_ages.size() - 1)
 
