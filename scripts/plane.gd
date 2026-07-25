@@ -17,11 +17,20 @@ var target: Vector2 = GameConfig.ISLAND_CENTER
 var bomb_dropped: bool = false
 var _main: Node2D
 var _smoke_timer: float = 0.0
-var _trail_timer: float = 0.0
 var _spin: float = 0.0
 var _exit_dir: Vector2 = Vector2.RIGHT
 var _exit_time: float = 0.0
 var _keep_pos: Vector2 = GameConfig.ISLAND_CENTER
+
+# Soft fading contrail (world-space discs — never black smoke).
+var _contrail_root: Node2D
+var _contrail_points: PackedVector2Array = PackedVector2Array()
+var _contrail_ages: PackedFloat32Array = PackedFloat32Array()
+var _contrail_sample: float = 0.0
+var _contrail_pool: Array[Polygon2D] = []
+const CONTRAIL_LIFE := 0.7
+const CONTRAIL_SAMPLE := 0.035
+const CONTRAIL_MAX_POINTS := 18
 
 # Gunship strafing run
 var _shots_left: int = GameConfig.GUNSHIP_SHOT_COUNT
@@ -116,10 +125,13 @@ func _physics_process(delta: float) -> void:
 	match phase:
 		Phase.FLYING:
 			_fly(delta)
+			_update_contrail(delta, true)
 		Phase.SIZZLING:
 			_sizzle(delta)
+			_update_contrail(delta, false)
 		Phase.EXITING:
 			_exit(delta)
+			_update_contrail(delta, true)
 
 
 func current_velocity() -> Vector2:
@@ -131,7 +143,6 @@ func current_velocity() -> Vector2:
 func _fly(delta: float) -> void:
 	if _carpet_run:
 		_carpet_pass(delta)
-		_emit_trail(delta, false)
 		return
 
 	if type == GameConfig.PlaneType.GUNSHIP and _shots_left > 0:
@@ -143,7 +154,6 @@ func _fly(delta: float) -> void:
 	shadow.position = Vector2(14, 18)
 	var dist := global_position.distance_to(target)
 	var keep_dist := global_position.distance_to(_keep_pos)
-	_emit_trail(delta, false)
 
 	match type:
 		GameConfig.PlaneType.GUNSHIP:
@@ -240,7 +250,6 @@ func _exit(delta: float) -> void:
 	global_position += _exit_dir * speed * 1.15 * delta
 	rotation = _exit_dir.angle()
 	shadow.position = Vector2(14, 18)
-	_emit_trail(delta, false)
 	# Leave the playfield, then despawn (distance, off-screen, or timeout safety).
 	if (
 		global_position.distance_to(_keep_pos) > 700.0
@@ -283,48 +292,115 @@ func _sizzle(delta: float) -> void:
 	_smoke_timer -= delta
 	if _smoke_timer <= 0.0:
 		_smoke_timer = 0.06
-		_emit_smoke_puff(true)
+		_emit_crash_smoke()
 
 	if modulate.a <= 0.05 or scale.x < 0.35:
 		exploded.emit(global_position)
 		_finish(false)
 
 
-func _emit_trail(delta: float, heavy: bool) -> void:
-	_trail_timer -= delta
-	if _trail_timer > 0.0:
+func _effects_parent() -> Node:
+	if _main and is_instance_valid(_main):
+		var under_main: Node = _main.get_node_or_null("Effects")
+		if under_main:
+			return under_main
+	var under_scene: Node = get_parent().get_parent().get_node_or_null("Effects")
+	if under_scene:
+		return under_scene
+	return get_tree().current_scene
+
+
+func _ensure_contrail() -> void:
+	if _contrail_root != null and is_instance_valid(_contrail_root):
 		return
-	_trail_timer = GameConfig.PLANE_TRAIL_INTERVAL * (0.7 if heavy else 1.0)
-	_emit_smoke_puff(heavy)
+	var parent := _effects_parent()
+	if parent == null:
+		return
+	_contrail_root = Node2D.new()
+	_contrail_root.z_index = 5
+	_contrail_root.name = "Contrail"
+	parent.add_child(_contrail_root)
+	_contrail_pool.clear()
+	for _i in CONTRAIL_MAX_POINTS:
+		var disc := Polygon2D.new()
+		var pts := PackedVector2Array()
+		for j in 10:
+			var a := TAU * float(j) / 10.0
+			pts.append(Vector2(cos(a), sin(a)) * 5.0)
+		disc.polygon = pts
+		disc.visible = false
+		_contrail_root.add_child(disc)
+		_contrail_pool.append(disc)
 
 
-func _emit_smoke_puff(heavy: bool = false) -> void:
+## Pale age-fading discs — no black smoke on regular flight.
+func _update_contrail(delta: float, growing: bool) -> void:
+	_ensure_contrail()
+	if _contrail_root == null:
+		return
+
+	var keep_pts := PackedVector2Array()
+	var keep_ages := PackedFloat32Array()
+	for i in _contrail_points.size():
+		var age := _contrail_ages[i] + delta
+		if age < CONTRAIL_LIFE:
+			keep_pts.append(_contrail_points[i])
+			keep_ages.append(age)
+	_contrail_points = keep_pts
+	_contrail_ages = keep_ages
+
+	if growing:
+		_contrail_sample -= delta
+		if _contrail_sample <= 0.0:
+			_contrail_sample = CONTRAIL_SAMPLE
+			var tip := global_position + Vector2.LEFT.rotated(rotation) * 8.0
+			_contrail_points.insert(0, tip)
+			_contrail_ages.insert(0, 0.0)
+			while _contrail_points.size() > CONTRAIL_MAX_POINTS:
+				_contrail_points.remove_at(_contrail_points.size() - 1)
+				_contrail_ages.remove_at(_contrail_ages.size() - 1)
+
+	var tint: Color = GameConfig.PLANE_TYPE_TINTS[type]
+	var r := lerpf(1.0, tint.r, 0.3)
+	var g := lerpf(1.0, tint.g, 0.28)
+	var b := lerpf(1.0, tint.b, 0.2)
+	for i in _contrail_pool.size():
+		var disc: Polygon2D = _contrail_pool[i]
+		if i >= _contrail_points.size():
+			disc.visible = false
+			continue
+		var t: float = clampf(_contrail_ages[i] / CONTRAIL_LIFE, 0.0, 1.0)
+		disc.visible = true
+		disc.global_position = _contrail_points[i]
+		disc.scale = Vector2.ONE * lerpf(1.15, 0.35, t)
+		disc.color = Color(r, g, b, lerpf(0.7, 0.0, t))
+
+
+## Crash-only: Kenney smoke while sizzling down.
+func _emit_crash_smoke() -> void:
+	var parent := _effects_parent()
+	if parent == null:
+		return
 	var puff := Sprite2D.new()
 	puff.texture = FxAtlas.smoke_frame(randi_range(0, 8))
-	var back := Vector2.LEFT.rotated(rotation) * (12.0 if not heavy else 6.0)
-	puff.global_position = global_position + back
-	puff.scale = Vector2(0.1, 0.1) if not heavy else Vector2(0.16, 0.16)
-	if heavy:
-		puff.modulate = Color(0.35, 0.32, 0.3, 0.85)
-	else:
-		# Soft white contrail so birds read against blue water.
-		puff.modulate = Color(0.95, 0.97, 1.0, 0.45)
+	puff.global_position = global_position + Vector2.LEFT.rotated(rotation) * 6.0
+	puff.scale = Vector2(0.16, 0.16)
+	puff.modulate = Color(0.35, 0.32, 0.3, 0.85)
 	puff.z_index = 4
-	var parent: Node = null
-	if _main and is_instance_valid(_main):
-		parent = _main.get_node_or_null("Effects")
-	if parent == null:
-		parent = get_parent().get_parent().get_node_or_null("Effects")
-	if parent:
-		parent.add_child(puff)
-	else:
-		get_tree().current_scene.add_child(puff)
+	parent.add_child(puff)
 	var tw := puff.create_tween()
-	var end_scale := Vector2(0.22, 0.22) if not heavy else Vector2(0.32, 0.32)
-	var life := 0.4 if not heavy else 0.55
-	tw.tween_property(puff, "modulate:a", 0.0, life)
-	tw.parallel().tween_property(puff, "scale", end_scale, life)
+	tw.tween_property(puff, "modulate:a", 0.0, 0.55)
+	tw.parallel().tween_property(puff, "scale", Vector2(0.34, 0.34), 0.55)
 	tw.tween_callback(puff.queue_free)
+
+
+func _clear_contrail() -> void:
+	if _contrail_root != null and is_instance_valid(_contrail_root):
+		_contrail_root.queue_free()
+	_contrail_root = null
+	_contrail_pool.clear()
+	_contrail_points = PackedVector2Array()
+	_contrail_ages = PackedFloat32Array()
 
 
 func _finish(delivered: bool) -> void:
@@ -334,6 +410,7 @@ func _finish(delivered: bool) -> void:
 		return
 	_done = true
 	set_physics_process(false)
+	_clear_contrail()
 	# Mark deletion before emitting so squadron-spent checks skip this bird.
 	queue_free()
 	finished.emit(delivered)
