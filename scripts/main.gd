@@ -320,17 +320,23 @@ func _set_won() -> void:
 	)
 	var campaign_done := current_level >= GameConfig.LEVEL_COUNT
 	game_won.emit(last_stars, campaign_done)
-	# Bake the next beach while the after-action modal is up, so "Next bastion"
-	# can close + pan immediately instead of hitching on a WASM pixel bake.
-	if not campaign_done:
-		get_tree().create_timer(0.45).timeout.connect(_prep_next_bastion, CONNECT_ONE_SHOT)
 
 
-func _prep_next_bastion() -> void:
+## Called by the HUD after the win-star flip finishes — never during the tween.
+## Pre-bakes the next beach so "Next bastion" can pan without a sync hitch.
+func prep_next_bastion_after_stars() -> void:
 	if state != State.WON or current_level >= GameConfig.LEVEL_COUNT:
 		return
 	var idx := current_level  # 0-based index of the next bastion
 	_ensure_island_built(idx, Island.BakeQuality.COARSE)
+	# Spread the heavy hi-res pass onto the next frame so this one only pays for
+	# shape + coarse (keeps the modal from feeling frozen after the last star).
+	call_deferred("_prep_next_bastion_hires", idx)
+
+
+func _prep_next_bastion_hires(idx: int) -> void:
+	if state != State.WON:
+		return
 	if idx < 0 or idx >= _islands.size():
 		return
 	var isl: Island = _islands[idx]
