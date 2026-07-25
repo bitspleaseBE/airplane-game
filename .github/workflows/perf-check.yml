@@ -16,8 +16,10 @@ on:
 env:
   GODOT_VERSION: "4.7.1"
   GODOT_STATUS: "stable"
-  # llvmpipe calibration — see header comment before changing.
-  PERF_SCALE: "12"
+  # llvmpipe calibration from PR #1 artifacts (~149ms idle p95 / 10ms local
+  # budget ≈ 15×, plus ~25% runner headroom). Recalibrate from report.json
+  # after runner-image changes — do not touch script default budgets.
+  PERF_SCALE: "19"
 
 jobs:
   perf:
