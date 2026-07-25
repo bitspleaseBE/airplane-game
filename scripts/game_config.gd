@@ -1,10 +1,6 @@
 extends Node
 
 ## Shared gameplay constants and level-scaling helpers for Bastion Bomber.
-##
-## Runtime quality (set in _ready): web/mobile use a cheap ocean + capped
-## shader island list so Retina WebGL stays playable. Native desktop keeps
-## the full look — that is what tools/perf_check.sh measures.
 
 const LEVEL_COUNT := 20
 
@@ -152,38 +148,6 @@ const SCENIC_SEP_FROM_SCENIC := 400.0
 
 ## Campaign milestones: oversized islands with denser outer defenses.
 const STRONGHOLD_LEVELS := [10, 15, 20]
-
-## Runtime quality — defaults = full desktop. Web/mobile override in _ready.
-## 0 = cheap ocean, 1 = full (see water.gdshader).
-var water_quality: int = 1
-## Max coasts fed to the water shader (nearest to the camera).
-var shader_island_cap: int = 40
-var scenic_count_min: int = SCENIC_ISLAND_COUNT_MIN
-var scenic_count_max: int = SCENIC_ISLAND_COUNT_MAX
-## Web: render at design resolution then upscale (cuts fragment cost on HiDPI).
-var use_viewport_scale: bool = false
-var contrail_max_points: int = 16
-
-
-func _ready() -> void:
-	_apply_platform_quality()
-
-
-func _apply_platform_quality() -> void:
-	## Web/mobile cannot afford full-screen multi-octave water at device-pixel
-	## resolution with 20+ island samples per fragment.
-	if not (OS.has_feature("web") or OS.has_feature("mobile")):
-		return
-	water_quality = 0
-	shader_island_cap = 6
-	scenic_count_min = 4
-	scenic_count_max = 6
-	contrail_max_points = 8
-	use_viewport_scale = OS.has_feature("web")
-
-
-func is_constrained_quality() -> bool:
-	return water_quality <= 0
 
 
 func level_t(level: int) -> float:
