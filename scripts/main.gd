@@ -18,16 +18,29 @@ var active_planes: int = 0
 var last_stars: int = 0
 var active_center: Vector2 = GameConfig.ISLAND_CENTER
 
+## Per-siege after-action report (reset each level / retry).
+var planes_deployed: int = 0
+var planes_crashed: int = 0
+var guns_destroyed: int = 0
+## Running campaign totals — only banked on wins.
+var campaign_planes_deployed: int = 0
+var campaign_planes_crashed: int = 0
+var campaign_guns_destroyed: int = 0
+
 var _spawn_cooldown: float = 0.0
 var _holding: bool = false
 var _hold_pos: Vector2 = Vector2.ZERO
 var _islands: Array[Island] = []
+## Empty tropical islets between bastions — not playable targets.
+var _scenic_islands: Array[Island] = []
 var _active_island: Island
 var _last_keep_max_hp: int = GameConfig.KEEP_MAX_HP
 var _last_gun_count: int = 0
 var _pending_ordnance: int = 0
 ## Island indices still waiting for shape/defenses + coarse texture.
 var _pending_island_builds: Array[int] = []
+## Scenic indices waiting for a coarse texture bake.
+var _pending_scenic_builds: Array[int] = []
 
 @onready var camera: Camera2D = $Camera
 @onready var islands_root: Node2D = $Islands
@@ -139,6 +152,7 @@ func retry_level() -> void:
 	squadron_size = GameConfig.squadron_for_level(current_level)
 	planes_remaining = squadron_size
 	active_planes = 0
+	_reset_siege_stats()
 	state = State.PLAYING
 	_emit_hud()
 	level_changed.emit(current_level)
@@ -157,9 +171,13 @@ func restart_campaign() -> void:
 	## In-place restart — avoid reload_current_scene()'s full teardown hitch.
 	_clear_combatants()
 	_pending_island_builds.clear()
+	_pending_scenic_builds.clear()
 	if _active_island:
 		_disconnect_island(_active_island)
 		_active_island = null
+	campaign_planes_deployed = 0
+	campaign_planes_crashed = 0
+	campaign_guns_destroyed = 0
 	_build_campaign()
 	_apply_open_ocean()
 	_activate_level(1, false)
@@ -191,7 +209,7 @@ func _try_spawn(world_pos: Vector2, from_press: bool = false) -> void:
 	# Land only — shallow lagoon and deep open water are both fair game.
 	if dist < shore + 12.0:
 		return
-	# Don't seed a bird on top of another bastion's island.
+	# Don't seed a bird on top of another bastion's island — or a scenic islet.
 	for island in _islands:
 		if island == null or island == _active_island:
 			continue
@@ -200,18 +218,27 @@ func _try_spawn(world_pos: Vector2, from_press: bool = false) -> void:
 		var other_shore: float = island.get_shore_radius((world_pos - other_c).angle())
 		if other_d < other_shore + 12.0:
 			return
+	for scenic in _scenic_islands:
+		if scenic == null or not scenic.is_built():
+			continue
+		var sc: Vector2 = scenic.get_center()
+		var sd := world_pos.distance_to(sc)
+		var ss: float = scenic.get_shore_radius((world_pos - sc).angle())
+		if sd < ss + 12.0:
+			return
 
 	var plane_type: GameConfig.PlaneType = GameConfig.plane_type_for_level(current_level)
 	_spawn_cooldown = GameConfig.deploy_interval_for_plane(plane_type)
 	planes_remaining -= 1
 	active_planes += 1
+	planes_deployed += 1
 	_emit_hud()
 
 	var plane: PlaneUnit = _plane_scene.instantiate()
 	planes.add_child(plane)
 	plane.setup(world_pos, center, self, plane_type)
 	plane.finished.connect(_on_plane_finished)
-	plane.exploded.connect(func(pos: Vector2) -> void: _spawn_explosion(pos, 1.0, Boom.CRASH))
+	plane.exploded.connect(_on_plane_exploded)
 
 
 func _on_plane_finished(_delivered_bomb: bool) -> void:
@@ -219,6 +246,11 @@ func _on_plane_finished(_delivered_bomb: bool) -> void:
 	_check_squadron_spent()
 	# Re-check next idle frame — covers any residual living-node timing.
 	call_deferred("_check_squadron_spent")
+
+
+func _on_plane_exploded(pos: Vector2) -> void:
+	planes_crashed += 1
+	_spawn_explosion(pos, 1.0, Boom.CRASH)
 
 
 func _check_squadron_spent() -> void:
@@ -260,6 +292,10 @@ func _set_won() -> void:
 	state = State.WON
 	_last_keep_max_hp = keep.max_hp if keep else GameConfig.KEEP_MAX_HP
 	_last_gun_count = _active_island.gun_count_initial() if _active_island else 0
+	_refresh_guns_destroyed()
+	campaign_planes_deployed += planes_deployed
+	campaign_planes_crashed += planes_crashed
+	campaign_guns_destroyed += guns_destroyed
 	var used := squadron_size - planes_remaining
 	last_stars = GameConfig.stars_for_win(
 		used, _last_keep_max_hp, _last_gun_count, squadron_size, current_level
@@ -270,7 +306,36 @@ func _set_won() -> void:
 
 func _set_lost() -> void:
 	state = State.LOST
+	_refresh_guns_destroyed()
 	game_lost.emit()
+
+
+func _refresh_guns_destroyed() -> void:
+	if _active_island == null:
+		guns_destroyed = 0
+		return
+	guns_destroyed = maxi(_active_island.gun_count_initial() - _active_island.gun_count(), 0)
+
+
+func _reset_siege_stats() -> void:
+	planes_deployed = 0
+	planes_crashed = 0
+	guns_destroyed = 0
+
+
+func result_stats(campaign_complete: bool = false) -> Dictionary:
+	## After-action numbers for the result modal.
+	if campaign_complete:
+		return {
+			"planes_deployed": campaign_planes_deployed,
+			"planes_crashed": campaign_planes_crashed,
+			"guns_destroyed": campaign_guns_destroyed,
+		}
+	return {
+		"planes_deployed": planes_deployed,
+		"planes_crashed": planes_crashed,
+		"guns_destroyed": guns_destroyed,
+	}
 
 
 func apply_bomb_at(pos: Vector2, damage: int) -> void:
@@ -396,7 +461,9 @@ func _emit_hud() -> void:
 
 func _build_campaign() -> void:
 	_islands.clear()
+	_scenic_islands.clear()
 	_pending_island_builds.clear()
+	_pending_scenic_builds.clear()
 	# Free immediately so a rebuild never stacks keeps on the same spot.
 	while islands_root.get_child_count() > 0:
 		var c := islands_root.get_child(0)
@@ -415,18 +482,129 @@ func _build_campaign() -> void:
 		else:
 			_pending_island_builds.append(i)
 
+	_place_scenic_islands(positions)
+
+
+func _place_scenic_islands(bastion_positions: Array[Vector2]) -> void:
+	## Sparse empty islets in the gaps — archipelago feel without crowding sieges.
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash("scenic_archipelago")
+	var target := rng.randi_range(GameConfig.SCENIC_ISLAND_COUNT_MIN, GameConfig.SCENIC_ISLAND_COUNT_MAX)
+	var occupied: Array[Vector2] = bastion_positions.duplicate()
+	var placed := 0
+	var seed_key := 0
+
+	# Prefer midpoints between consecutive bastions, offset sideways into open water.
+	for i in range(bastion_positions.size() - 1):
+		if placed >= target:
+			break
+		if rng.randf() > 0.62:
+			continue
+		var a: Vector2 = bastion_positions[i]
+		var b: Vector2 = bastion_positions[i + 1]
+		var mid := (a + b) * 0.5
+		var along := (b - a).normalized()
+		var side := Vector2(-along.y, along.x)
+		if rng.randf() < 0.5:
+			side = -side
+		var offset := rng.randf_range(380.0, 720.0)
+		var candidate := mid + side * offset
+		# Nudge along the segment so they aren't always dead-center.
+		candidate += along * rng.randf_range(-220.0, 220.0)
+		if not _scenic_slot_clear(candidate, occupied, GameConfig.SCENIC_SEP_FROM_BASTION, GameConfig.SCENIC_SEP_FROM_SCENIC, bastion_positions.size()):
+			# Flip side and retry once.
+			candidate = mid - side * offset + along * rng.randf_range(-180.0, 180.0)
+			if not _scenic_slot_clear(candidate, occupied, GameConfig.SCENIC_SEP_FROM_BASTION, GameConfig.SCENIC_SEP_FROM_SCENIC, bastion_positions.size()):
+				continue
+		_spawn_scenic(candidate, seed_key, rng)
+		occupied.append(candidate)
+		seed_key += 1
+		placed += 1
+
+	# One or two near-field satellites so early sieges aren't lonely open ocean.
+	# Keep them outside the usual spawn ring (~island radius + margin).
+	for i in mini(3, bastion_positions.size()):
+		if placed >= target:
+			break
+		if rng.randf() > 0.7:
+			continue
+		var anchor2: Vector2 = bastion_positions[i]
+		var ang2 := rng.randf() * TAU
+		var dist2 := rng.randf_range(420.0, 560.0)
+		var candidate3 := anchor2 + Vector2.from_angle(ang2) * dist2
+		if not _scenic_slot_clear(candidate3, occupied, 400.0, GameConfig.SCENIC_SEP_FROM_SCENIC, bastion_positions.size()):
+			continue
+		_spawn_scenic(candidate3, seed_key, rng)
+		occupied.append(candidate3)
+		seed_key += 1
+		placed += 1
+
+	# Fill remaining budget with free-floating islets near the chain.
+	var guard := 0
+	while placed < target and guard < 80:
+		guard += 1
+		var anchor: Vector2 = bastion_positions[rng.randi_range(0, bastion_positions.size() - 1)]
+		var ang := rng.randf() * TAU
+		var dist := rng.randf_range(GameConfig.SCENIC_SEP_FROM_BASTION + 40.0, GameConfig.SCENIC_SEP_FROM_BASTION + 520.0)
+		var candidate2 := anchor + Vector2.from_angle(ang) * dist
+		if not _scenic_slot_clear(candidate2, occupied, GameConfig.SCENIC_SEP_FROM_BASTION, GameConfig.SCENIC_SEP_FROM_SCENIC, bastion_positions.size()):
+			continue
+		_spawn_scenic(candidate2, seed_key, rng)
+		occupied.append(candidate2)
+		seed_key += 1
+		placed += 1
+
+
+func _scenic_slot_clear(
+	candidate: Vector2,
+	occupied: Array[Vector2],
+	bastion_sep: float,
+	scenic_sep: float,
+	bastion_count: int,
+) -> bool:
+	for i in occupied.size():
+		var min_d := bastion_sep if i < bastion_count else scenic_sep
+		if candidate.distance_to(occupied[i]) < min_d:
+			return false
+	return true
+
+
+func _spawn_scenic(pos: Vector2, seed_key: int, rng: RandomNumberGenerator) -> void:
+	var island: Island = _island_scene.instantiate()
+	islands_root.add_child(island)
+	island.global_position = pos
+	island.visible = false
+	var radius := rng.randf_range(GameConfig.SCENIC_RADIUS_MIN, GameConfig.SCENIC_RADIUS_MAX)
+	_scenic_islands.append(island)
+	# Queue coarse bake so boot stays snappy; shape is tiny so one-per-frame is fine.
+	_pending_scenic_builds.append(_scenic_islands.size() - 1)
+	# Stash seed/radius on the node via meta until drain builds it.
+	island.set_meta("scenic_seed", seed_key)
+	island.set_meta("scenic_radius", radius)
+
 
 func _drain_island_build_queue() -> void:
 	## One bastion shell + coarse texture enqueue per frame after boot.
-	if _pending_island_builds.is_empty():
+	if not _pending_island_builds.is_empty():
+		var i: int = _pending_island_builds.pop_front()
+		if i >= 0 and i < _islands.size():
+			var island: Island = _islands[i]
+			if island and is_instance_valid(island):
+				island.build(i + 1, self, Island.BakeQuality.COARSE)
+				_apply_open_ocean()
 		return
-	var i: int = _pending_island_builds.pop_front()
-	if i < 0 or i >= _islands.size():
+	if _pending_scenic_builds.is_empty():
 		return
-	var island: Island = _islands[i]
-	if island == null or not is_instance_valid(island):
+	var si: int = _pending_scenic_builds.pop_front()
+	if si < 0 or si >= _scenic_islands.size():
 		return
-	island.build(i + 1, self, Island.BakeQuality.COARSE)
+	var scenic: Island = _scenic_islands[si]
+	if scenic == null or not is_instance_valid(scenic):
+		return
+	var seed_key: int = int(scenic.get_meta("scenic_seed", si))
+	var radius: float = float(scenic.get_meta("scenic_radius", GameConfig.SCENIC_RADIUS_MIN))
+	scenic.build_scenic(seed_key, radius, self, Island.BakeQuality.COARSE)
+	scenic.visible = true
 	_apply_open_ocean()
 
 
@@ -505,6 +683,7 @@ func _activate_level(level: int, pan: bool) -> void:
 	squadron_size = GameConfig.squadron_for_level(current_level)
 	planes_remaining = squadron_size
 	active_planes = 0
+	_reset_siege_stats()
 
 	# Prefetch the next beach texture during this siege so Next isn't a hitch.
 	if current_level < GameConfig.LEVEL_COUNT:
@@ -587,6 +766,14 @@ func _apply_open_ocean() -> void:
 				continue
 			centers.append(island.get_center())
 			radii.append(island.get_water_min_radius())
+		for scenic in _scenic_islands:
+			if scenic == null or not scenic.is_built():
+				continue
+			# Cap so shader array (40) never overflows with a dense campaign.
+			if centers.size() >= 40:
+				break
+			centers.append(scenic.get_center())
+			radii.append(scenic.get_water_min_radius())
 		mat.set_shader_parameter("island_centers", centers)
 		mat.set_shader_parameter("island_radii", radii)
 		mat.set_shader_parameter("island_count", centers.size())

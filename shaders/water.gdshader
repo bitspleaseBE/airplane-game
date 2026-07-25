@@ -12,8 +12,8 @@ uniform sampler2D radius_lut : filter_linear, repeat_enable;
 // Campaign islands: water shades from bright shallows near any coast to deep
 // open sea between islands.
 uniform int island_count = 0;
-uniform vec2 island_centers[20];
-uniform float island_radii[20];
+uniform vec2 island_centers[40];
+uniform float island_radii[40];
 
 uniform vec4 deep_color : source_color = vec4(0.12, 0.40, 0.68, 1.0);
 uniform vec4 ocean_color : source_color = vec4(0.22, 0.56, 0.80, 1.0);

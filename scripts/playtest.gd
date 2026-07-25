@@ -17,6 +17,8 @@ extends Node
 ##   --briefing            force the first-play mission briefing on screen
 ##   --wing-briefing[=NAME] force wing unlock vignette (bomber|strike|carpet)
 ##   --force-lose          after the start shot, fire the lose overlay (HUD UI check)
+##   --force-win           after the start shot, fire the win overlay (HUD UI check)
+##   --force-campaign-win  win overlay with campaign-complete copy + totals
 ##   --squadron=N          shrink reserves to N so depleting the budget can resolve as a loss
 
 const WAVE_SIZE := 5
@@ -33,6 +35,8 @@ var _force_briefing := false
 var _force_wing_briefing := false
 var _force_wing_name := "bomber"
 var _force_lose := false
+var _force_win := false
+var _force_campaign_win := false
 var _squadron_cap := -1
 
 var _main: Node2D
@@ -79,6 +83,15 @@ func _ready() -> void:
 				_force_wing_name = arg.trim_prefix("--wing-briefing=").strip_edges().to_lower()
 		elif arg == "--force-lose":
 			_force_lose = true
+			_planes_to_spawn = 0
+			_duration = mini(_duration, 4.0)
+		elif arg == "--force-win":
+			_force_win = true
+			_planes_to_spawn = 0
+			_duration = mini(_duration, 4.0)
+		elif arg == "--force-campaign-win":
+			_force_campaign_win = true
+			_force_win = true
 			_planes_to_spawn = 0
 			_duration = mini(_duration, 4.0)
 		elif arg.begins_with("--squadron="):
@@ -148,12 +161,39 @@ func _run() -> void:
 	await _screenshot("start")
 
 	if _force_lose and _main.has_method("_set_lost"):
+		if "planes_deployed" in _main:
+			_main.planes_deployed = 9
+		if "planes_crashed" in _main:
+			_main.planes_crashed = 9
+		if "guns_destroyed" in _main:
+			_main.guns_destroyed = 2
 		_main._set_lost()
+		await get_tree().create_timer(0.5).timeout
+	elif _force_win:
+		# Seed after-action numbers so the modal isn't a wall of zeros.
+		if _force_campaign_win:
+			if "campaign_planes_deployed" in _main:
+				_main.campaign_planes_deployed = 186
+			if "campaign_planes_crashed" in _main:
+				_main.campaign_planes_crashed = 61
+			if "campaign_guns_destroyed" in _main:
+				_main.campaign_guns_destroyed = 94
+		else:
+			if "planes_deployed" in _main:
+				_main.planes_deployed = 12
+			if "planes_crashed" in _main:
+				_main.planes_crashed = 4
+			if "guns_destroyed" in _main:
+				_main.guns_destroyed = 7
+		if "state" in _main:
+			_main.state = 1  # State.WON
+		if _main.has_signal("game_won"):
+			_main.game_won.emit(3, _force_campaign_win)
 		await get_tree().create_timer(0.5).timeout
 
 	var next_shot := _shot_interval
 	while _elapsed() < _duration and _result == "timeout":
-		if _force_lose:
+		if _force_lose or _force_win:
 			await get_tree().process_frame
 			continue
 		if _deployed < _planes_to_spawn:
@@ -171,7 +211,9 @@ func _run() -> void:
 
 	print("PLAYTEST loop done, result=%s elapsed=%.1f" % [_result, _elapsed()])
 	# Let the win/lose overlay (or final effects) render before the last frame.
-	await get_tree().create_timer(1.0).timeout
+	# Stars flip one-by-one (~1.8s); give force overlays enough settle time.
+	var settle := 2.0 if (_force_win or _force_lose) else 1.0
+	await get_tree().create_timer(settle).timeout
 	await _screenshot("end-" + _result)
 	print("PLAYTEST end shot saved")
 	_write_summary()

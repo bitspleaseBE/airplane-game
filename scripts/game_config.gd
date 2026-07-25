@@ -135,6 +135,14 @@ const ISLAND_SPACING_MIN := 1400.0
 const ISLAND_SPACING_MAX := 1800.0
 const CAMERA_PAN_DURATION := 1.2
 
+## Empty tropical islets between bastions — scenery only, no guns.
+const SCENIC_ISLAND_COUNT_MIN := 8
+const SCENIC_ISLAND_COUNT_MAX := 12
+const SCENIC_RADIUS_MIN := 55.0
+const SCENIC_RADIUS_MAX := 135.0
+const SCENIC_SEP_FROM_BASTION := 560.0
+const SCENIC_SEP_FROM_SCENIC := 400.0
+
 ## Campaign milestones: oversized islands with denser outer defenses.
 const STRONGHOLD_LEVELS := [10, 15, 20]
 

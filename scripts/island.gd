@@ -26,14 +26,20 @@ enum CoastShape {
 	DOUBLE_BAY,
 	CRESCENT,
 	PENINSULA,
+	## Long tropical spit / sandbar arm off a compact body.
+	ARM,
 	KIDNEY,
 	COVE,
 	LOBED,
+	## Curved hook arm — common reef/atoll fragment silhouette.
+	HOOK,
 }
 
 var level: int = 1
 var island_radius: float = GameConfig.ISLAND_RADIUS
 var active: bool = false
+## Scenery-only islet: no keep, turrets, or towers.
+var scenic: bool = false
 
 var _main: Node2D
 var _rng := RandomNumberGenerator.new()
@@ -65,11 +71,17 @@ var _tower_scene: PackedScene = preload("res://scenes/tower.tscn")
 
 
 func build(level_num: int, main_ref: Node2D, quality: BakeQuality = BakeQuality.COARSE) -> void:
+	scenic = false
 	level = level_num
 	_main = main_ref
 	# Stable per-level seed so each bastion keeps its silhouette across retries.
 	_rng.seed = hash("bastion_%d" % level)
-	island_radius = GameConfig.island_radius_for_level(level)
+	var base_r := GameConfig.island_radius_for_level(level)
+	# Size jitter so the chain isn't a parade of same-radius disks.
+	if GameConfig.is_stronghold_level(level):
+		island_radius = base_r
+	else:
+		island_radius = base_r * _rng.randf_range(0.78, 1.16)
 	_grass_min_radius = lerpf(120.0, 155.0, GameConfig.level_t(level))
 	if GameConfig.is_stronghold_level(level):
 		_grass_min_radius = lerpf(_grass_min_radius, 175.0, 0.7)
@@ -92,10 +104,51 @@ func build(level_num: int, main_ref: Node2D, quality: BakeQuality = BakeQuality.
 	_scatter_towers()
 	_scatter_trees()
 	_built = true
+	_finish_bake(quality)
+	set_active(false)
 
+
+## Empty tropical islet — land + palms only. Used to break up open ocean.
+func build_scenic(seed_key: int, radius: float, main_ref: Node2D, quality: BakeQuality = BakeQuality.COARSE) -> void:
+	scenic = true
+	level = 0
+	_main = main_ref
+	_rng.seed = hash("scenic_%d" % seed_key)
+	island_radius = radius
+	_grass_min_radius = clampf(radius * 0.42, 28.0, 70.0)
+	var scenic_shapes: Array[CoastShape] = [
+		CoastShape.ARM,
+		CoastShape.HOOK,
+		CoastShape.CRESCENT,
+		CoastShape.PENINSULA,
+		CoastShape.LOBED,
+		CoastShape.KIDNEY,
+		CoastShape.BAY,
+	]
+	_coast_shape = scenic_shapes[seed_key % scenic_shapes.size()]
+
+	_clear_children(land)
+	_clear_defenses(false)
+	_hide_keep()
+
+	_generate_island_shape()
+	_bake_gen += 1
+	_hires_done = false
+	_hires_baking = false
+	_base_sprite = Sprite2D.new()
+	_base_sprite.position = Vector2.ZERO
+	_base_sprite.z_index = -2
+	land.add_child(_base_sprite)
+
+	_scatter_trees()
+	_built = true
+	_finish_bake(quality)
+	set_active(false)
+
+
+func _finish_bake(quality: BakeQuality) -> void:
 	match quality:
 		BakeQuality.HIRES:
-			# One sync bake at full quality — skip the coarse→hires double pass.
 			var img := _render_island_image(ISLAND_IMG_SCALE_ACTIVE)
 			_base_sprite.texture = ImageTexture.create_from_image(img)
 			_base_sprite.scale = Vector2.ONE * ISLAND_IMG_SCALE_ACTIVE
@@ -104,7 +157,15 @@ func build(level_num: int, main_ref: Node2D, quality: BakeQuality = BakeQuality.
 			_start_bake_async(false)
 		BakeQuality.NONE:
 			pass
-	set_active(false)
+
+
+func _hide_keep() -> void:
+	if keep == null:
+		return
+	keep.visible = false
+	keep.set_process(false)
+	if keep.hp_bar:
+		keep.hp_bar.visible = false
 
 
 func is_built() -> bool:
@@ -133,6 +194,8 @@ func set_active(on: bool) -> void:
 	# Pixel math runs on WorkerThreadPool; only ImageTexture apply hits the main thread.
 	if on and not _hires_done and not _hires_baking:
 		_start_bake_async(true)
+	if scenic:
+		return
 	if keep:
 		keep.set_process(on)
 		if keep.hp_bar:
@@ -164,6 +227,8 @@ func get_water_min_radius() -> float:
 	var max_sand := island_radius * 0.85
 	for i in _sand_lut.size():
 		max_sand = maxf(max_sand, _sand_lut[i])
+	for islet in _islets:
+		max_sand = maxf(max_sand, islet[0].length() + float(islet[1]))
 	return max_sand + 15.0
 
 
@@ -270,6 +335,7 @@ func _place_keep() -> void:
 		keep = _keep_scene.instantiate()
 		add_child(keep)
 		keep.name = "Keep"
+	keep.visible = true
 	keep.position = Vector2.ZERO
 	keep.z_index = 1
 	keep.configure(GameConfig.keep_hp_for_level(level))
@@ -404,8 +470,8 @@ func _scatter_trees() -> void:
 		var shelf := sand_r - grass_r
 		if shelf > 55.0:
 			long_beach_slots.append(theta)
-	# Uniform 0–10 palms; placement still prefers long beaches when present.
-	var count := _rng.randi_range(0, 10)
+	# Uniform 0–10 palms; scenic islets stay sparse so they don't read as bases.
+	var count := _rng.randi_range(0, 4) if scenic else _rng.randi_range(0, 10)
 
 	var attempts := 0
 	while placed.size() < count and attempts < 500:
@@ -425,7 +491,9 @@ func _scatter_trees() -> void:
 			d = lerpf(grass_r + 6.0, sand_r - 10.0, _rng.randf_range(0.15, 0.75))
 		else:
 			d = grass_r + _rng.randf_range(-8.0, minf(14.0, shelf * 0.3))
-		if d < GameConfig.FORT_CLEAR_RADIUS + 25.0:
+		if d < GameConfig.FORT_CLEAR_RADIUS + 25.0 and not scenic:
+			continue
+		if scenic and d < _grass_min_radius * 0.35:
 			continue
 		var pos := Vector2.from_angle(theta) * d
 		var occupied := false
@@ -456,13 +524,15 @@ func _coast_shape_for_level(level_num: int) -> CoastShape:
 	if level_num == 10:
 		return CoastShape.DOUBLE_BAY
 	if level_num == 15:
-		return CoastShape.CRESCENT
+		return CoastShape.ARM
 	if level_num == 20:
-		return CoastShape.LOBED
+		return CoastShape.HOOK
 	var order: Array[CoastShape] = [
 		CoastShape.ROUND,
+		CoastShape.ARM,
 		CoastShape.BAY,
 		CoastShape.PENINSULA,
+		CoastShape.HOOK,
 		CoastShape.KIDNEY,
 		CoastShape.COVE,
 		CoastShape.CRESCENT,
@@ -483,9 +553,19 @@ func _generate_island_shape() -> void:
 	fine.fractal_octaves = 2
 	fine.frequency = 0.8
 
-	var grass_base := big_r * _rng.randf_range(0.48, 0.56)
-	var sand_base := big_r * _rng.randf_range(0.84, 0.94)
+	var grass_base := big_r * _rng.randf_range(0.46, 0.56)
+	var sand_base := big_r * _rng.randf_range(0.82, 0.94)
 	var axis := _rng.randf() * TAU
+	# Mild ellipse so even "round" coasts aren't perfect disks.
+	var stretch := _rng.randf_range(0.1, 0.22)
+	# Arm / hook / peninsula may stick past the nominal radius.
+	var arm_extend := (
+		_coast_shape == CoastShape.ARM
+		or _coast_shape == CoastShape.HOOK
+		or _coast_shape == CoastShape.PENINSULA
+	)
+	var sand_cap := big_r * (1.48 if arm_extend else 1.08)
+	var grass_cap := big_r * (0.95 if arm_extend else 0.72)
 
 	# Multiplicative silhouette first — this is what makes bays/crescents readable.
 	var profile := PackedFloat32Array()
@@ -511,6 +591,9 @@ func _generate_island_shape() -> void:
 		var nx := cos(theta) * 3.0
 		var ny := sin(theta) * 3.0
 		var shape_m := profile[i]
+		# Ellipse stretch along the silhouette axis.
+		var ellipse := 1.0 + stretch * cos(2.0 * (theta - axis))
+		shape_m *= ellipse
 		var g := grass_base * shape_m + fine.get_noise_2d(nx, ny) * 0.028 * big_r
 		var s := sand_base * shape_m + fine.get_noise_2d(nx + 9.0, ny + 9.0) * 0.04 * big_r
 		for h in harmonics:
@@ -518,37 +601,50 @@ func _generate_island_shape() -> void:
 			s += h[2] * sin(h[0] * theta + h[3] + 0.7)
 		# Keep the fort clear, but let bays cut deep into the outer ring.
 		var g_floor := _grass_min_radius * lerpf(0.72, 0.92, shape_m)
-		g = clampf(g, g_floor, big_r * 0.72)
+		if scenic:
+			g_floor = _grass_min_radius * 0.55
+		g = clampf(g, g_floor, grass_cap)
 		var shelf := lerpf(38.0, 110.0, shelf_boost[i])
 		# Long beaches opposite deep bites; thin shelves inside coves.
 		if shape_m < 0.85:
 			shelf = lerpf(28.0, 48.0, shape_m)
+		if scenic:
+			shelf = lerpf(12.0, 34.0, shelf_boost[i])
 		# Erratic beach width so the sand ring never reads as concentric.
-		shelf += fine.get_noise_2d(nx * 1.7 + 40.0, ny * 1.7 + 40.0) * 20.0
-		s = clampf(s, g + shelf * 0.85, minf(big_r, g + shelf + 20.0))
+		shelf += fine.get_noise_2d(nx * 1.7 + 40.0, ny * 1.7 + 40.0) * (8.0 if scenic else 20.0)
+		s = clampf(s, g + shelf * 0.85, minf(sand_cap, g + shelf + 28.0))
 		# Prefer the profiled sand when the shelf boost asks for a wide beach.
 		if shelf_boost[i] > 0.55:
 			s = maxf(s, g + shelf)
 		_grass_lut[i] = g
-		_sand_lut[i] = minf(s, big_r)
+		_sand_lut[i] = minf(s, sand_cap)
 
 	# Kill only pixel-level wiggle; keep the chunky erratic bumps.
 	_smooth_lut(_grass_lut, 2)
 	_smooth_lut(_sand_lut, 2)
 	for i in ISLAND_LUT_SIZE:
-		_sand_lut[i] = maxf(_sand_lut[i], _grass_lut[i] + 30.0)
+		_sand_lut[i] = maxf(_sand_lut[i], _grass_lut[i] + (18.0 if scenic else 30.0))
 
 	_islets.clear()
-	var want_islets := _coast_shape == CoastShape.LOBED or _coast_shape == CoastShape.PENINSULA or _rng.randf() < 0.4
-	if want_islets:
+	var want_islets := (
+		_coast_shape == CoastShape.LOBED
+		or _coast_shape == CoastShape.PENINSULA
+		or _coast_shape == CoastShape.ARM
+		or _coast_shape == CoastShape.HOOK
+		or _rng.randf() < 0.4
+	)
+	if want_islets and not scenic:
 		var islet_n := _rng.randi_range(1, 3) if _coast_shape == CoastShape.LOBED else _rng.randi_range(1, 2)
 		for i in islet_n:
 			var ang := axis + PI + _rng.randf_range(-1.0, 1.0)
 			if _coast_shape == CoastShape.LOBED:
 				ang = axis + TAU * float(i) / 3.0 + _rng.randf_range(-0.3, 0.3)
+			elif _coast_shape == CoastShape.ARM or _coast_shape == CoastShape.HOOK:
+				# Satellite off the tip of the arm.
+				ang = axis + _rng.randf_range(-0.35, 0.35)
 			var islet_r := _rng.randf_range(14.0, 30.0)
 			var lo := _lut_at(_sand_lut, ang) + islet_r + 18.0
-			var hi := big_r - islet_r - 2.0
+			var hi := sand_cap - islet_r - 2.0
 			if hi <= lo:
 				continue
 			_islets.append([Vector2.from_angle(ang) * _rng.randf_range(lo, hi), islet_r])
@@ -556,16 +652,16 @@ func _generate_island_shape() -> void:
 	# Shallow lobes: irregular turquoise patches that connect to the shelf
 	# instead of tracing the sand rim 1:1.
 	_shallow_lobes.clear()
-	var lobe_n := _rng.randi_range(4, 7)
+	var lobe_n := _rng.randi_range(3, 5) if scenic else _rng.randi_range(4, 7)
 	for i in lobe_n:
 		var ang := axis + TAU * float(i) / float(lobe_n) + _rng.randf_range(-0.7, 0.7)
 		var sand_r := _lut_at(_sand_lut, ang)
-		var lobe_r := _rng.randf_range(32.0, 70.0)
+		var lobe_r := _rng.randf_range(24.0, 55.0) if scenic else _rng.randf_range(32.0, 70.0)
 		var d := sand_r + _rng.randf_range(2.0, 34.0)
 		_shallow_lobes.append([Vector2.from_angle(ang) * d, lobe_r])
 
 
-## Writes a 0.55–1.25 radius multiplier and a 0–1 beach-width boost per LUT sample.
+## Writes a 0.55–1.6 radius multiplier and a 0–1 beach-width boost per LUT sample.
 func _build_coast_profile(profile: PackedFloat32Array, shelf_boost: PackedFloat32Array, axis: float) -> void:
 	for i in ISLAND_LUT_SIZE:
 		var theta := TAU * float(i) / float(ISLAND_LUT_SIZE)
@@ -573,7 +669,7 @@ func _build_coast_profile(profile: PackedFloat32Array, shelf_boost: PackedFloat3
 		var shelf := 0.35
 		match _coast_shape:
 			CoastShape.ROUND:
-				m = 1.0 + 0.06 * sin(2.0 * theta + axis)
+				m = 1.0 + 0.1 * sin(2.0 * theta + axis)
 				shelf = 0.4 + 0.15 * sin(theta * 3.0 + axis)
 			CoastShape.BAY:
 				# Deep horseshoe bite + fat beach on the far side.
@@ -593,15 +689,39 @@ func _build_coast_profile(profile: PackedFloat32Array, shelf_boost: PackedFloat3
 				shelf = lerpf(0.3, 0.9, 1.0 - bite)
 			CoastShape.CRESCENT:
 				var along := cos(theta - axis)
-				m = lerpf(0.62, 1.18, (along + 1.0) * 0.5)
+				m = lerpf(0.58, 1.22, (along + 1.0) * 0.5)
 				# Scoop the inner arc.
 				var inner := exp(-0.5 * pow(wrapf(theta - axis - PI, -PI, PI) / 0.85, 2.0))
-				m -= 0.18 * inner
+				m -= 0.22 * inner
 				shelf = lerpf(0.35, 1.0, 1.0 - inner)
 			CoastShape.PENINSULA:
-				var along := cos(theta - axis)
-				m = lerpf(0.78, 1.28, pow((along + 1.0) * 0.5, 1.4))
-				shelf = lerpf(0.55, 0.85, (along + 1.0) * 0.5)
+				# Compact body + broad headland that reads as a real arm.
+				var d := absf(wrapf(theta - axis, -PI, PI))
+				var tip := exp(-0.5 * pow(d / 0.42, 2.0))
+				m = lerpf(0.72, 0.92, 0.5 + 0.5 * cos(theta - axis))
+				m = maxf(m, lerpf(0.95, 1.48, tip))
+				shelf = lerpf(0.45, 0.95, tip)
+			CoastShape.ARM:
+				# Compact body with a long thin tropical spit — the classic arm.
+				var d := absf(wrapf(theta - axis, -PI, PI))
+				var spit := exp(-0.5 * pow(d / 0.22, 2.0))
+				var body := lerpf(0.62, 0.88, 0.5 + 0.5 * cos(theta - axis + PI * 0.15))
+				m = maxf(body, lerpf(1.0, 1.62, pow(spit, 0.85)))
+				# Tiny opposing stub so it doesn't look glued on one side.
+				var stub := exp(-0.5 * pow(wrapf(theta - axis - PI, -PI, PI) / 0.38, 2.0))
+				m = maxf(m, lerpf(0.7, 1.05, stub * 0.55))
+				shelf = lerpf(0.35, 1.0, spit)
+			CoastShape.HOOK:
+				# Curved reef arm: tip bends off-axis like a broken atoll fragment.
+				var tip_ang := axis + 0.55
+				var d_base := absf(wrapf(theta - axis, -PI, PI))
+				var d_tip := absf(wrapf(theta - tip_ang, -PI, PI))
+				var base_arm := exp(-0.5 * pow(d_base / 0.32, 2.0))
+				var tip := exp(-0.5 * pow(d_tip / 0.28, 2.0))
+				m = lerpf(0.64, 0.9, 0.5 + 0.5 * cos(theta - axis))
+				m = maxf(m, lerpf(0.95, 1.35, base_arm))
+				m = maxf(m, lerpf(1.05, 1.58, tip))
+				shelf = lerpf(0.4, 0.98, maxf(base_arm, tip))
 			CoastShape.KIDNEY:
 				var along := cos(theta - axis)
 				m = lerpf(0.7, 1.15, absf(along))
@@ -617,9 +737,9 @@ func _build_coast_profile(profile: PackedFloat32Array, shelf_boost: PackedFloat3
 				shelf = lerpf(0.2, 0.75, 1.0 - mouth)
 			CoastShape.LOBED:
 				var tri := 0.5 + 0.5 * cos(3.0 * (theta - axis))
-				m = lerpf(0.72, 1.22, pow(tri, 1.1))
+				m = lerpf(0.68, 1.32, pow(tri, 1.1))
 				shelf = lerpf(0.45, 0.9, tri)
-		profile[i] = clampf(m, 0.55, 1.3)
+		profile[i] = clampf(m, 0.52, 1.65)
 		shelf_boost[i] = clampf(shelf, 0.0, 1.0)
 
 
@@ -717,7 +837,15 @@ static func render_island_image(
 	shallow_lobes: Array,
 ) -> Image:
 	var pad := 110.0
-	var size := int(ceil((p_radius + pad) * 2.0 / img_scale))
+	# Arms / islets can stick past the nominal radius — size the bake to the true extent.
+	var extent := p_radius
+	for i in sand_lut.size():
+		extent = maxf(extent, sand_lut[i])
+	for islet in islets:
+		extent = maxf(extent, islet[0].length() + float(islet[1]))
+	for lobe in shallow_lobes:
+		extent = maxf(extent, lobe[0].length() + float(lobe[1]))
+	var size := int(ceil((extent + pad) * 2.0 / img_scale))
 	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
 	var c := size * 0.5
 	var tex_noise := FastNoiseLite.new()

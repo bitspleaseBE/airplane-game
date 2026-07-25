@@ -77,10 +77,12 @@ var _force_wing_briefing := false
 @onready var overlay: Control = $Root/Overlay
 @onready var overlay_vignette: ColorRect = $Root/Overlay/Vignette
 @onready var overlay_dim: ColorRect = $Root/Overlay/Dim
-@onready var stars_row: HBoxContainer = $Root/Overlay/StarsRow
-@onready var result_label: Label = $Root/Overlay/ResultLabel
-@onready var restart_button: Button = $Root/Overlay/ActionRow/RestartButton
-@onready var new_game_button: Button = $Root/Overlay/ActionRow/NewGameButton
+@onready var overlay_modal: PanelContainer = $Root/Overlay/Modal
+@onready var stars_row: HBoxContainer = $Root/Overlay/Modal/Body/StarsRow
+@onready var result_label: Label = $Root/Overlay/Modal/Body/ResultLabel
+@onready var stats_label: Label = $Root/Overlay/Modal/Body/StatsLabel
+@onready var restart_button: Button = $Root/Overlay/Modal/Body/ActionRow/RestartButton
+@onready var new_game_button: Button = $Root/Overlay/Modal/Body/ActionRow/NewGameButton
 @onready var version_label: Label = $Root/VersionLabel
 @onready var briefing: Control = $Root/Briefing
 @onready var briefing_vignette: ColorRect = $Root/Briefing/Vignette
@@ -408,12 +410,13 @@ func _on_won(stars: int = 3, campaign_complete: bool = false) -> void:
 	result_label.add_theme_color_override("font_outline_color", Color(0.12, 0.06, 0.02, 0.85))
 	result_label.add_theme_constant_override("outline_size", 5)
 	_animate_stars(stars)
+	_fill_result_stats(campaign_complete)
 	new_game_button.visible = false
 	if campaign_complete:
-		result_label.text = "ARCHIPELAGO CLEARED.\nEvery bastion is smoke and glory."
+		result_label.text = "ARCHIPELAGO CLEARED.\nOutstanding work, Commander.\nEvery bastion is smoke and glory."
 		restart_button.text = "Run it back"
 	else:
-		result_label.text = "BASTION DOWN.\nNothing left but smoke and glory."
+		result_label.text = "BASTION DOWN.\nWell flown, Commander.\nNothing left but smoke and glory."
 		restart_button.text = "Next bastion"
 	_arm_action_buttons()
 
@@ -429,18 +432,51 @@ func _on_lost() -> void:
 	result_label.add_theme_color_override("font_outline_color", Color(0.12, 0.06, 0.02, 0.85))
 	result_label.add_theme_constant_override("outline_size", 5)
 	stars_row.visible = false
-	result_label.text = "Squadron's gone.\nUnacceptable, Commander."
+	_fill_result_stats(false)
+	result_label.text = "Squadron's spent.\nUnacceptable, Commander."
 	restart_button.text = "Try again"
 	new_game_button.visible = true
 	new_game_button.text = "Start over"
 	_arm_action_buttons()
 
 
+func _fill_result_stats(campaign_complete: bool) -> void:
+	var deployed := 0
+	var crashed := 0
+	var guns := 0
+	if _main and _main.has_method("result_stats"):
+		var stats: Dictionary = _main.result_stats(campaign_complete)
+		deployed = int(stats.get("planes_deployed", 0))
+		crashed = int(stats.get("planes_crashed", 0))
+		guns = int(stats.get("guns_destroyed", 0))
+	elif _main:
+		deployed = int(_main.get("planes_deployed")) if "planes_deployed" in _main else 0
+		crashed = int(_main.get("planes_crashed")) if "planes_crashed" in _main else 0
+		guns = int(_main.get("guns_destroyed")) if "guns_destroyed" in _main else 0
+	var scope := "Campaign" if campaign_complete else "This siege"
+	stats_label.text = "%s report\nAirframes deployed: %d\nShot down: %d\nGuns silenced: %d" % [
+		scope, deployed, crashed, guns
+	]
+
+
 func _show_result_backdrop() -> void:
-	## Same warm vignette as the tap-water / new-plane briefings.
+	## Warm vignette + centered after-action modal.
 	overlay.visible = true
 	overlay_vignette.visible = true
-	overlay_dim.visible = false
+	overlay_dim.visible = true
+	if overlay_modal:
+		overlay_modal.visible = true
+		var half := Vector2(
+			(overlay_modal.offset_right - overlay_modal.offset_left) * 0.5,
+			(overlay_modal.offset_bottom - overlay_modal.offset_top) * 0.5
+		)
+		overlay_modal.pivot_offset = half
+		overlay_modal.modulate = Color(1, 1, 1, 0)
+		overlay_modal.scale = Vector2(0.92, 0.92)
+		var tw := create_tween()
+		tw.set_parallel(true)
+		tw.tween_property(overlay_modal, "modulate:a", 1.0, 0.22)
+		tw.tween_property(overlay_modal, "scale", Vector2.ONE, 0.28).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	_start_overlay_ambiance()
 
 
