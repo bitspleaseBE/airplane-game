@@ -28,9 +28,9 @@ var _contrail_points: PackedVector2Array = PackedVector2Array()
 var _contrail_ages: PackedFloat32Array = PackedFloat32Array()
 var _contrail_sample: float = 0.0
 var _contrail_pool: Array[Polygon2D] = []
-const CONTRAIL_LIFE := 0.7
-const CONTRAIL_SAMPLE := 0.035
-const CONTRAIL_MAX_POINTS := 18
+const CONTRAIL_LIFE := 0.5
+const CONTRAIL_SAMPLE := 0.03
+const CONTRAIL_MAX_POINTS := 16
 
 # Gunship strafing run
 var _shots_left: int = GameConfig.GUNSHIP_SHOT_COUNT
@@ -370,10 +370,12 @@ func _update_contrail(delta: float, growing: bool) -> void:
 			disc.visible = false
 			continue
 		var t: float = clampf(_contrail_ages[i] / CONTRAIL_LIFE, 0.0, 1.0)
+		# Ease out so the tail thins and vanishes clearly.
+		var fade := t * t
 		disc.visible = true
 		disc.global_position = _contrail_points[i]
-		disc.scale = Vector2.ONE * lerpf(1.15, 0.35, t)
-		disc.color = Color(r, g, b, lerpf(0.7, 0.0, t))
+		disc.scale = Vector2.ONE * lerpf(1.35, 0.2, fade)
+		disc.color = Color(r, g, b, lerpf(0.78, 0.0, fade))
 
 
 ## Crash-only: Kenney smoke while sizzling down.
