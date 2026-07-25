@@ -265,10 +265,7 @@ func _sizzle(delta: float) -> void:
 func _emit_smoke_puff() -> void:
 	# Lightweight: spawn a temporary sprite from smoke frames
 	var puff := Sprite2D.new()
-	var idx := randi_range(0, 8)
-	var path := "res://assets/effects/smoke/smoke_%02d.png" % idx
-	if ResourceLoader.exists(path):
-		puff.texture = load(path)
+	puff.texture = FxAtlas.smoke_frame(randi_range(0, 8))
 	puff.global_position = global_position
 	puff.scale = Vector2(0.12, 0.12)
 	puff.modulate = Color(1, 1, 1, 0.7)

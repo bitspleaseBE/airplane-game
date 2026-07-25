@@ -26,6 +26,8 @@ var _active_island: Island
 var _last_keep_max_hp: int = GameConfig.KEEP_MAX_HP
 var _last_gun_count: int = 0
 var _pending_ordnance: int = 0
+## Island indices still waiting for shape/defenses + coarse texture.
+var _pending_island_builds: Array[int] = []
 
 @onready var camera: Camera2D = $Camera
 @onready var islands_root: Node2D = $Islands
@@ -62,6 +64,7 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	_sync_map_layers_to_camera()
+	_drain_island_build_queue()
 	_spawn_cooldown = max(_spawn_cooldown - delta, 0.0)
 	# Safety net: if the counter is empty and nothing's airborne, settle the siege.
 	if state == State.PLAYING and planes_remaining <= 0 and active_planes <= 0:
@@ -79,6 +82,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		_holding = false
 		return
 
+	# With emulate_touch_from_mouse, a click emits ScreenTouch AND MouseButton.
+	# Only the touch path may spawn — handling both double-deploys one bird.
+	var touch_from_mouse: bool = ProjectSettings.get_setting(
+		"input_devices/pointing/emulate_touch_from_mouse", false
+	)
+
 	if event is InputEventScreenTouch:
 		if event.pressed:
 			_holding = true
@@ -88,12 +97,12 @@ func _unhandled_input(event: InputEvent) -> void:
 			_holding = false
 	elif event is InputEventScreenDrag:
 		_hold_pos = _screen_to_world(event.position)
-	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+	elif not touch_from_mouse and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		_holding = event.pressed
 		if event.pressed:
 			_hold_pos = get_global_mouse_position()
 			_try_spawn(_hold_pos, true)
-	elif event is InputEventMouseMotion and _holding:
+	elif not touch_from_mouse and event is InputEventMouseMotion and _holding:
 		_hold_pos = get_global_mouse_position()
 
 
@@ -145,7 +154,17 @@ func goto_next_level() -> void:
 
 
 func restart_campaign() -> void:
-	get_tree().reload_current_scene()
+	## In-place restart — avoid reload_current_scene()'s full teardown hitch.
+	_clear_combatants()
+	_pending_island_builds.clear()
+	if _active_island:
+		_disconnect_island(_active_island)
+		_active_island = null
+	_build_campaign()
+	_apply_open_ocean()
+	_activate_level(1, false)
+	_emit_hud()
+	Sfx.start_island_ambient(self)
 
 
 func restart() -> void:
@@ -285,10 +304,7 @@ func spawn_flak_burst(pos: Vector2) -> void:
 	Sfx.bomb(self)
 	for i in 4:
 		var puff := Sprite2D.new()
-		var idx := randi_range(0, 12)
-		var path := "res://assets/effects/smoke/smoke_%02d.png" % idx
-		if ResourceLoader.exists(path):
-			puff.texture = load(path)
+		puff.texture = FxAtlas.smoke_frame()
 		puff.global_position = pos + Vector2.from_angle(randf() * TAU) * randf_range(0.0, 24.0)
 		puff.scale = Vector2(0.14, 0.14)
 		puff.modulate = Color(0.25, 0.23, 0.26, 0.85)
@@ -380,6 +396,7 @@ func _emit_hud() -> void:
 
 func _build_campaign() -> void:
 	_islands.clear()
+	_pending_island_builds.clear()
 	# Free immediately so a rebuild never stacks keeps on the same spot.
 	while islands_root.get_child_count() > 0:
 		var c := islands_root.get_child(0)
@@ -391,8 +408,26 @@ func _build_campaign() -> void:
 		var island: Island = _island_scene.instantiate()
 		islands_root.add_child(island)
 		island.global_position = positions[i]
-		island.build(i + 1, self)
 		_islands.append(island)
+		if i == 0:
+			# Level 1 ready before play — one sync hi-res bake, no coarse pass.
+			island.build(1, self, Island.BakeQuality.HIRES)
+		else:
+			_pending_island_builds.append(i)
+
+
+func _drain_island_build_queue() -> void:
+	## One bastion shell + coarse texture enqueue per frame after boot.
+	if _pending_island_builds.is_empty():
+		return
+	var i: int = _pending_island_builds.pop_front()
+	if i < 0 or i >= _islands.size():
+		return
+	var island: Island = _islands[i]
+	if island == null or not is_instance_valid(island):
+		return
+	island.build(i + 1, self, Island.BakeQuality.COARSE)
+	_apply_open_ocean()
 
 
 func _layout_island_positions() -> Array[Vector2]:
@@ -459,6 +494,9 @@ func _activate_level(level: int, pan: bool) -> void:
 		_active_island.set_active(false)
 		_disconnect_island(_active_island)
 
+	# Ensure the target bastion exists before we aim the camera at it.
+	_ensure_island_built(current_level - 1, Island.BakeQuality.HIRES)
+
 	_active_island = _islands[current_level - 1]
 	active_center = _active_island.get_center()
 	_active_island.set_active(true)
@@ -467,6 +505,13 @@ func _activate_level(level: int, pan: bool) -> void:
 	squadron_size = GameConfig.squadron_for_level(current_level)
 	planes_remaining = squadron_size
 	active_planes = 0
+
+	# Prefetch the next beach texture during this siege so Next isn't a hitch.
+	if current_level < GameConfig.LEVEL_COUNT:
+		_ensure_island_built(current_level, Island.BakeQuality.NONE)
+		var next_island: Island = _islands[current_level]
+		if next_island:
+			next_island.prefetch_hires()
 
 	if pan:
 		state = State.TRANSITION
@@ -484,6 +529,20 @@ func _activate_level(level: int, pan: bool) -> void:
 		_emit_hud()
 
 	level_changed.emit(current_level)
+
+
+func _ensure_island_built(index: int, quality: Island.BakeQuality = Island.BakeQuality.HIRES) -> void:
+	if index < 0 or index >= _islands.size():
+		return
+	var island: Island = _islands[index]
+	if island == null or not is_instance_valid(island):
+		return
+	if island.is_built():
+		return
+	# Pull this index out of the background queue and build now.
+	_pending_island_builds.erase(index)
+	island.build(index + 1, self, quality)
+	_apply_open_ocean()
 
 
 func _wire_active_island() -> void:
@@ -524,11 +583,13 @@ func _apply_open_ocean() -> void:
 		var centers := PackedVector2Array()
 		var radii := PackedFloat32Array()
 		for island in _islands:
+			if island == null or not island.is_built():
+				continue
 			centers.append(island.get_center())
 			radii.append(island.get_water_min_radius())
 		mat.set_shader_parameter("island_centers", centers)
 		mat.set_shader_parameter("island_radii", radii)
-		mat.set_shader_parameter("island_count", _islands.size())
+		mat.set_shader_parameter("island_count", centers.size())
 
 
 func _apply_clouds_enabled() -> void:

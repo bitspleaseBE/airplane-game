@@ -45,10 +45,7 @@ func _physics_process(delta: float) -> void:
 
 func _emit_trail() -> void:
 	var puff := Sprite2D.new()
-	var idx := randi_range(0, 8)
-	var path := "res://assets/effects/smoke/smoke_%02d.png" % idx
-	if ResourceLoader.exists(path):
-		puff.texture = load(path)
+	puff.texture = FxAtlas.smoke_frame(randi_range(0, 8))
 	puff.global_position = global_position - velocity.normalized() * 10.0
 	puff.scale = Vector2(0.09, 0.09)
 	puff.modulate = Color(1.0, 0.92, 0.8, 0.6)

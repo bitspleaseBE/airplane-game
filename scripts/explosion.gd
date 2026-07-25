@@ -11,10 +11,7 @@ const FRAME_TIME := 0.05
 
 
 func _ready() -> void:
-	for i in range(9):
-		var path := "res://assets/effects/explosion/explosion_%02d.png" % i
-		if ResourceLoader.exists(path):
-			_frames.append(load(path))
+	_frames = FxAtlas.EXPLOSION.duplicate()
 	if _frames.is_empty():
 		queue_free()
 		return
