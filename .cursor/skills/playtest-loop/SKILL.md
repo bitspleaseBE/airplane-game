@@ -48,7 +48,7 @@ tools/playtest.sh --strategy=blitz --seed=7   # dump-all tactic, reproducible ru
 
 Strategies: `spread` (default, patient, evenly around the island), `blitz` (everything as fast as possible), `waves` (squads of 5 from alternating sides). `--level=N` is forwarded to `main.set_level()` once the game has levels.
 
-Default run deploys 6 bombers over ~25s — good for most feature checks. For win/lose screens or end-of-game logic use the full run; for difficulty and balance questions use the `design-gates` skill and `tools/balance_check.sh` instead. For frame-rate / performance questions use the `perf-check` skill and `tools/perf_check.sh` (the harness also accepts `--perf` and `--ocean=flat|off` for one-off profiling).
+Default run deploys 6 bombers over ~25s — good for most feature checks. For win/lose screens or end-of-game logic use the full run; for difficulty and balance questions use the `design-gates` skill and `tools/balance_check.sh` instead. For any feature with runtime impact, also run the `perf-check` skill / `tools/perf_check.sh` before calling the work done (see `.cursor/rules/perf-check-on-features.mdc`). The harness accepts `--perf` and `--ocean=flat|off` for one-off profiling.
 
 ## Step 4: Evaluate
 
