@@ -184,6 +184,9 @@ func is_built() -> bool:
 func prefetch_hires() -> void:
 	if not _built or _hires_done or _hires_baking:
 		return
+	# Web export has thread_support=false — prefetch would sync-hitch combat.
+	if not _can_use_worker_threads():
+		return
 	_start_bake_async(true)
 
 
@@ -214,8 +217,10 @@ func reset_for_retry() -> void:
 
 func set_active(on: bool) -> void:
 	active = on
-	# Pixel math runs on WorkerThreadPool; only ImageTexture apply hits the main thread.
-	if on and not _hires_done and not _hires_baking:
+	# Native+threads: kick a background hi-res bake. No-threads web must not —
+	# WorkerThreadPool tasks never run until wait(), so the old await-loop hung
+	# forever, and a sync bake here would hitch every activation mid-frame.
+	if on and not _hires_done and not _hires_baking and _can_use_worker_threads():
 		_start_bake_async(true)
 	if scenic:
 		return
@@ -870,10 +875,16 @@ func _lut_at(lut: PackedFloat32Array, theta: float) -> float:
 	return lerpf(lut[i], lut[(i + 1) % ISLAND_LUT_SIZE], t - float(i))
 
 
+func _can_use_worker_threads() -> bool:
+	## Web preset sets variant/thread_support=false — OS.has_feature("threads")
+	## is false there. Polling is_task_completed without wait() deadlocks.
+	return OS.has_feature("threads")
+
+
 func _exit_tree() -> void:
 	# Workers must not touch this Node — wait so free() during rebuild can't race.
 	_bake_gen += 1
-	if _bake_task_id >= 0:
+	if _bake_task_id >= 0 and _can_use_worker_threads():
 		WorkerThreadPool.wait_for_task_completion(_bake_task_id)
 		_bake_task_id = -1
 	_hires_baking = false
@@ -895,6 +906,14 @@ func _start_bake_async(hires: bool) -> void:
 	_bake_gen += 1
 	var gen := _bake_gen
 	var img_scale := ISLAND_IMG_SCALE_ACTIVE if hires else ISLAND_IMG_SCALE
+
+	# No-threads export (web): bake on the main thread. Never use the
+	# await-until-completed loop — tasks do not run until wait() is called.
+	if not _can_use_worker_threads():
+		var img := _render_island_image(img_scale)
+		_apply_bake_image(img, img_scale, hires, gen)
+		return
+
 	# Snapshot all inputs so the worker never touches this Node.
 	var snap_radius := island_radius
 	var snap_level := level
@@ -911,30 +930,40 @@ func _start_bake_async(hires: bool) -> void:
 	_finish_bake_async(_bake_task_id, result_holder, img_scale, hires, gen)
 
 
-func _finish_bake_async(
-	task_id: int, result_holder: Array, img_scale: float, hires: bool, gen: int
-) -> void:
-	while not WorkerThreadPool.is_task_completed(task_id):
-		await get_tree().process_frame
-	WorkerThreadPool.wait_for_task_completion(task_id)
-	if _bake_task_id == task_id:
-		_bake_task_id = -1
+func _apply_bake_image(img: Image, img_scale: float, hires: bool, gen: int) -> void:
 	if not is_instance_valid(self) or gen != _bake_gen:
+		if hires:
+			_hires_baking = false
 		return
-	if result_holder.is_empty():
+	if img == null:
 		if hires:
 			_hires_baking = false
 		return
 	# Don't let a late coarse bake overwrite a hi-res (or in-flight hi-res).
 	if not hires and (_hires_done or _hires_baking):
 		return
-	var img: Image = result_holder[0]
 	if _base_sprite and is_instance_valid(_base_sprite):
 		_base_sprite.texture = ImageTexture.create_from_image(img)
 		_base_sprite.scale = Vector2.ONE * img_scale
 	if hires:
 		_hires_done = true
 		_hires_baking = false
+
+
+func _finish_bake_async(
+	task_id: int, result_holder: Array, img_scale: float, hires: bool, gen: int
+) -> void:
+	# Cooperative wait: yield frames while the worker runs. Only valid when
+	# threads exist — otherwise is_task_completed stays false forever.
+	while not WorkerThreadPool.is_task_completed(task_id):
+		await get_tree().process_frame
+	WorkerThreadPool.wait_for_task_completion(task_id)
+	if _bake_task_id == task_id:
+		_bake_task_id = -1
+	if result_holder.is_empty():
+		_apply_bake_image(null, img_scale, hires, gen)
+		return
+	_apply_bake_image(result_holder[0], img_scale, hires, gen)
 
 
 ## Thread-safe pixel bake — no Node access; all inputs are value snapshots.

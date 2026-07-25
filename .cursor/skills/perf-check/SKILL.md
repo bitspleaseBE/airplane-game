@@ -75,16 +75,20 @@ It does **not** measure:
 - Phone thermal throttling or device-pixel (Retina) fill-rate
 - An iPhone 12 Pro (or any specific handset)
 
-Web/mobile use a separate **constrained quality** path (`GameConfig.water_quality
-= 0`, nearest-N shader islands, viewport upscale) that this native gate does
-not exercise. After changing `shaders/water.gdshader`, scenic density, or
-quality caps, verify on a phone browser (or desktop DevTools device mode) in
-addition to `tools/perf_check.sh`.
-
 For true mobile-browser numbers, export web and profile on device (or browser
 DevTools). Treat bake budgets as especially predictive for web freezes; treat
 frame-time gates as native proxies that still catch shader/gameplay regressions
 early.
+
+## Web / no-threads caveat
+
+The Web export preset has `variant/thread_support=false`. Island beach baking
+must **not** await `WorkerThreadPool.is_task_completed()` on that target —
+without threads the task never runs until `wait_for_task_completion()`, so the
+await loop hangs and gameplay hitching follows. Use sync/deferred bakes when
+`OS.has_feature("threads")` is false (see `Island._can_use_worker_threads`).
+Never sync-bake the active hi-res beach inside `_ready()` on web (freezes the
+load splash); upgrade on a deferred frame after the scene is up.
 
 ## CI (llvmpipe) vs phones
 
