@@ -20,6 +20,10 @@ extends Node
 ##   --force-win           after the start shot, fire the win overlay (HUD UI check)
 ##   --force-campaign-win  win overlay with campaign-complete copy + totals
 ##   --squadron=N          shrink reserves to N so depleting the budget can resolve as a loss
+##   --perf                benchmark mode: vsync off, per-frame CPU/GPU timing,
+##                         island-bake timing; writes a "perf" block to the summary
+##   --ocean=flat|off      perf attribution: flat = island_count 0 (skip the
+##                         per-island shader loop), off = hide the ocean rect
 
 const WAVE_SIZE := 5
 
@@ -38,6 +42,13 @@ var _force_lose := false
 var _force_win := false
 var _force_campaign_win := false
 var _squadron_cap := -1
+var _perf := false
+var _ocean_mode := ""  # "" (normal) | "flat" | "off"
+var _perf_sampling := false
+var _frame_ms := PackedFloat32Array()
+var _gpu_ms := PackedFloat32Array()
+var _cpu_render_ms := PackedFloat32Array()
+var _draw_calls_max := 0
 
 var _main: Node2D
 var _result := "timeout"
@@ -96,6 +107,18 @@ func _ready() -> void:
 			_duration = mini(_duration, 4.0)
 		elif arg.begins_with("--squadron="):
 			_squadron_cap = int(arg.trim_prefix("--squadron="))
+		elif arg == "--perf":
+			_perf = true
+		elif arg.begins_with("--ocean="):
+			_ocean_mode = arg.trim_prefix("--ocean=")
+	if _perf:
+		# Uncap the frame rate so FPS reflects real headroom, and let the
+		# renderer report per-viewport CPU/GPU time.
+		DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
+		Engine.max_fps = 0
+		RenderingServer.viewport_set_measure_render_time(get_viewport().get_viewport_rid(), true)
+		# Periodic screenshots stall the pipeline (GPU readback) — start/end only.
+		_shot_interval = 100000.0
 	if _rng_seed >= 0:
 		seed(_rng_seed)
 	DirAccess.make_dir_recursive_absolute(_abs_out())
@@ -111,6 +134,38 @@ func _ready() -> void:
 		get_tree().quit(1)
 	)
 	_run()
+
+
+func _process(delta: float) -> void:
+	if not _perf:
+		return
+	# The game re-feeds island arrays to the ocean shader as builds finish, so
+	# attribution overrides must be re-asserted every frame.
+	_apply_ocean_mode()
+	if not _perf_sampling:
+		return
+	_frame_ms.append(delta * 1000.0)
+	var rid := get_viewport().get_viewport_rid()
+	_gpu_ms.append(RenderingServer.viewport_get_measured_render_time_gpu(rid))
+	_cpu_render_ms.append(RenderingServer.viewport_get_measured_render_time_cpu(rid))
+	_draw_calls_max = maxi(
+		_draw_calls_max,
+		int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)),
+	)
+
+
+func _apply_ocean_mode() -> void:
+	if _ocean_mode.is_empty() or _main == null or not "ocean" in _main:
+		return
+	var ocean: CanvasItem = _main.ocean
+	if ocean == null:
+		return
+	if _ocean_mode == "off":
+		ocean.visible = false
+	elif _ocean_mode == "flat":
+		var mat := ocean.material as ShaderMaterial
+		if mat:
+			mat.set_shader_parameter("island_count", 0)
 
 
 func _run() -> void:
@@ -191,6 +246,11 @@ func _run() -> void:
 			_main.game_won.emit(3, _force_campaign_win)
 		await get_tree().create_timer(0.5).timeout
 
+	if _perf:
+		# Let boot bakes / first-frame hitches settle before measuring.
+		await get_tree().create_timer(1.0).timeout
+		_perf_sampling = true
+
 	var next_shot := _shot_interval
 	while _elapsed() < _duration and _result == "timeout":
 		if _force_lose or _force_win:
@@ -209,6 +269,7 @@ func _run() -> void:
 			await _screenshot("t%02ds" % int(_elapsed()))
 			next_shot = _elapsed() + _shot_interval
 
+	_perf_sampling = false
 	print("PLAYTEST loop done, result=%s elapsed=%.1f" % [_result, _elapsed()])
 	# Let the win/lose overlay (or final effects) render before the last frame.
 	# Stars flip one-by-one (~1.8s); give force overlays enough settle time.
@@ -333,10 +394,70 @@ func _write_summary() -> void:
 		"screenshots": _shots,
 		"out_dir": _out_dir,
 	}
+	if _perf:
+		summary["perf"] = _perf_report()
 	print("PLAYTEST_SUMMARY " + JSON.stringify(summary))
 	var f := FileAccess.open(_abs_out().path_join("summary.json"), FileAccess.WRITE)
 	f.store_string(JSON.stringify(summary, "  "))
 	f.close()
+
+
+func _perf_report() -> Dictionary:
+	var window := DisplayServer.window_get_size()
+	var report := {
+		"ocean_mode": "normal" if _ocean_mode.is_empty() else _ocean_mode,
+		"window": "%dx%d" % [window.x, window.y],
+		"samples": _frame_ms.size(),
+		"fps_avg": 0.0,
+		"frame_ms": _stats(_frame_ms),
+		"gpu_ms": _stats(_gpu_ms),
+		"cpu_render_ms": _stats(_cpu_render_ms),
+		"draw_calls_max": _draw_calls_max,
+		"node_count": int(Performance.get_monitor(Performance.OBJECT_NODE_COUNT)),
+	}
+	var total_ms := 0.0
+	for v in _frame_ms:
+		total_ms += v
+	if total_ms > 0.0:
+		report["fps_avg"] = snappedf(float(_frame_ms.size()) * 1000.0 / total_ms, 0.1)
+	report["island_bake"] = _bake_benchmark()
+	return report
+
+
+## Time one island texture bake at both qualities — this is the exact per-pixel
+## GDScript work that runs on the main thread in the no-threads web export.
+func _bake_benchmark() -> Dictionary:
+	if not is_instance_valid(_main) or not _main.has_method("get_active_island"):
+		return {}
+	var isl: Island = _main.get_active_island()
+	if isl == null:
+		return {}
+	var out := {}
+	for entry in [["coarse_ms", 3.0], ["hires_ms", 1.5]]:
+		var t0 := Time.get_ticks_usec()
+		Island.render_island_image(
+			entry[1], isl.island_radius, isl.level,
+			isl._sand_lut, isl._grass_lut, isl._islets, isl._shallow_lobes,
+		)
+		out[entry[0]] = snappedf(float(Time.get_ticks_usec() - t0) / 1000.0, 0.1)
+	return out
+
+
+func _stats(samples: PackedFloat32Array) -> Dictionary:
+	if samples.is_empty():
+		return {}
+	var s := samples.duplicate()
+	s.sort()
+	var sum := 0.0
+	for v in s:
+		sum += v
+	var n := s.size()
+	return {
+		"avg": snappedf(sum / float(n), 0.01),
+		"p50": snappedf(s[n / 2], 0.01),
+		"p95": snappedf(s[mini(int(float(n) * 0.95), n - 1)], 0.01),
+		"max": snappedf(s[n - 1], 0.01),
+	}
 
 
 func _elapsed() -> float:
