@@ -65,6 +65,7 @@ var keep: Keep:
 
 func _ready() -> void:
 	randomize()
+	_apply_display_quality()
 	_build_campaign()
 	_apply_open_ocean()
 	_apply_clouds_enabled()
@@ -73,6 +74,17 @@ func _ready() -> void:
 	hud.setup(self)
 	_emit_hud()
 	Sfx.start_island_ambient(self)
+
+
+func _apply_display_quality() -> void:
+	## Web: shade at the 720×1280 design buffer and upscale. canvas_items on a
+	## Retina phone runs the water shader at ~3× pixels and tanks FPS.
+	if not GameConfig.use_viewport_scale:
+		return
+	var win := get_window()
+	win.content_scale_mode = Window.CONTENT_SCALE_MODE_VIEWPORT
+	win.content_scale_aspect = Window.CONTENT_SCALE_ASPECT_EXPAND
+	win.content_scale_size = Vector2i(720, 1280)
 
 
 func _process(delta: float) -> void:
@@ -545,7 +557,7 @@ func _place_scenic_islands(bastion_positions: Array[Vector2]) -> void:
 	## Sparse empty islets in the gaps — archipelago feel without crowding sieges.
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash("scenic_archipelago")
-	var target := rng.randi_range(GameConfig.SCENIC_ISLAND_COUNT_MIN, GameConfig.SCENIC_ISLAND_COUNT_MAX)
+	var target := rng.randi_range(GameConfig.scenic_count_min, GameConfig.scenic_count_max)
 	var occupied: Array[Vector2] = bastion_positions.duplicate()
 	var placed := 0
 	var seed_key := 0
@@ -827,27 +839,35 @@ func _apply_open_ocean() -> void:
 	if ocean == null or ocean.material == null:
 		return
 	var mat := ocean.material as ShaderMaterial
-	if mat:
-		mat.set_shader_parameter("open_ocean", true)
-		# Feed island coasts so water lightens near shores and deepens offshore.
-		var centers := PackedVector2Array()
-		var radii := PackedFloat32Array()
-		for island in _islands:
-			if island == null or not island.is_built():
-				continue
-			centers.append(island.get_center())
-			radii.append(island.get_water_min_radius())
-		for scenic in _scenic_islands:
-			if scenic == null or not scenic.is_built():
-				continue
-			# Cap so shader array (40) never overflows with a dense campaign.
-			if centers.size() >= 40:
-				break
-			centers.append(scenic.get_center())
-			radii.append(scenic.get_water_min_radius())
-		mat.set_shader_parameter("island_centers", centers)
-		mat.set_shader_parameter("island_radii", radii)
-		mat.set_shader_parameter("island_count", centers.size())
+	if mat == null:
+		return
+	mat.set_shader_parameter("open_ocean", true)
+	mat.set_shader_parameter("water_quality", GameConfig.water_quality)
+	# Nearest coasts only — each island in the fragment loop is expensive on WebGL.
+	var focus := active_center
+	if camera:
+		focus = camera.get_screen_center_position()
+	var entries: Array = []
+	for island in _islands:
+		if island == null or not island.is_built():
+			continue
+		var c: Vector2 = island.get_center()
+		entries.append([focus.distance_squared_to(c), c, island.get_water_min_radius()])
+	for scenic in _scenic_islands:
+		if scenic == null or not scenic.is_built():
+			continue
+		var sc: Vector2 = scenic.get_center()
+		entries.append([focus.distance_squared_to(sc), sc, scenic.get_water_min_radius()])
+	entries.sort_custom(func(a, b): return a[0] < b[0])
+	var cap := clampi(GameConfig.shader_island_cap, 1, 40)
+	var centers := PackedVector2Array()
+	var radii := PackedFloat32Array()
+	for i in mini(entries.size(), cap):
+		centers.append(entries[i][1])
+		radii.append(entries[i][2])
+	mat.set_shader_parameter("island_centers", centers)
+	mat.set_shader_parameter("island_radii", radii)
+	mat.set_shader_parameter("island_count", centers.size())
 
 
 func _apply_clouds_enabled() -> void:
