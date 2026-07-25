@@ -250,7 +250,8 @@ func _on_plane_finished(_delivered_bomb: bool) -> void:
 
 func _on_plane_exploded(pos: Vector2) -> void:
 	planes_crashed += 1
-	_spawn_explosion(pos, 1.0, Boom.CRASH)
+	_spawn_explosion(pos, 1.45, Boom.CRASH)
+	_camera_kick(3.0)
 
 
 func _check_squadron_spent() -> void:
@@ -284,7 +285,8 @@ func _on_keep_destroyed() -> void:
 	if state != State.PLAYING:
 		return
 	if keep:
-		_spawn_explosion(keep.global_position, 2.2, Boom.BIG)
+		_spawn_explosion(keep.global_position, 2.8, Boom.BIG)
+		_camera_kick(8.0)
 	_set_won()
 
 
@@ -339,9 +341,29 @@ func result_stats(campaign_complete: bool = false) -> Dictionary:
 
 
 func apply_bomb_at(pos: Vector2, damage: int) -> void:
-	_spawn_explosion(pos, 1.0, Boom.BOMB)
+	# Punchier blast so bomb hits read clearly vs. grey smoke puffs.
+	_spawn_explosion(pos, 1.85, Boom.BOMB)
+	_camera_kick(4.5)
 	if _active_island:
 		_active_island.apply_bomb_at(pos, damage)
+
+
+## Cosmetic wing-release only — does not delay damage (falling bombs were reverted).
+func spawn_bomb_release(from_pos: Vector2, to_pos: Vector2) -> void:
+	var bomb := Sprite2D.new()
+	bomb.texture = preload("res://assets/projectiles/bomb.png")
+	bomb.global_position = from_pos
+	bomb.scale = Vector2(0.65, 0.65)
+	bomb.z_index = 16
+	bomb.modulate = Color(1.0, 1.0, 1.0, 0.95)
+	effects.add_child(bomb)
+	var mid := from_pos.lerp(to_pos, 0.55) + Vector2(0, -22)
+	var tw := bomb.create_tween()
+	tw.tween_property(bomb, "global_position", mid, 0.08).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.tween_property(bomb, "global_position", to_pos, 0.1).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tw.parallel().tween_property(bomb, "scale", Vector2(0.4, 0.4), 0.18)
+	tw.parallel().tween_property(bomb, "modulate:a", 0.0, 0.18)
+	tw.tween_callback(bomb.queue_free)
 
 
 ## Gunship strafe: tracer flash + point damage on whatever is under the impact.
@@ -350,6 +372,26 @@ func apply_gunfire(from_pos: Vector2, impact_pos: Vector2, damage: int) -> void:
 	Sfx.gun_hit(self)
 	if _active_island:
 		_active_island.apply_gunfire_at(impact_pos, damage)
+
+
+## Bright kill flash when a pad/tower dies — SEAD payoff.
+func spawn_gun_kill_flash(pos: Vector2) -> void:
+	_spawn_explosion(pos, 1.7, Boom.BOMB)
+	_camera_kick(2.5)
+	var flash := Polygon2D.new()
+	var pts := PackedVector2Array()
+	for i in 16:
+		var a := TAU * float(i) / 16.0
+		pts.append(Vector2(cos(a), sin(a)) * 28.0)
+	flash.polygon = pts
+	flash.color = Color(1.0, 0.95, 0.7, 0.75)
+	flash.z_index = 18
+	flash.global_position = pos
+	effects.add_child(flash)
+	var tw := flash.create_tween()
+	tw.tween_property(flash, "scale", Vector2(2.2, 2.2), 0.22).set_ease(Tween.EASE_OUT)
+	tw.parallel().tween_property(flash, "color:a", 0.0, 0.22)
+	tw.tween_callback(flash.queue_free)
 
 
 func launch_strike_missile(pos: Vector2, angle: float, target_pos: Vector2) -> void:
@@ -384,23 +426,26 @@ func spawn_flak_burst(pos: Vector2) -> void:
 func _spawn_tracer(from_pos: Vector2, impact_pos: Vector2) -> void:
 	var line := Line2D.new()
 	line.points = PackedVector2Array([from_pos, impact_pos])
-	line.width = 3.0
-	line.default_color = Color(1.0, 0.9, 0.45, 0.9)
+	line.width = 5.0
+	line.default_color = Color(1.0, 0.92, 0.4, 0.95)
 	line.z_index = 14
+	line.begin_cap_mode = Line2D.LINE_CAP_ROUND
+	line.end_cap_mode = Line2D.LINE_CAP_ROUND
 	effects.add_child(line)
 	var spark := Sprite2D.new()
 	spark.texture = preload("res://assets/projectiles/bullet.png")
 	spark.global_position = impact_pos
-	spark.scale = Vector2(0.5, 0.5)
-	spark.modulate = Color(1.0, 0.85, 0.4, 0.95)
-	spark.z_index = 14
+	spark.scale = Vector2(0.75, 0.75)
+	spark.modulate = Color(1.0, 0.9, 0.45, 1.0)
+	spark.z_index = 15
 	effects.add_child(spark)
 	var tw := line.create_tween()
-	tw.tween_property(line, "modulate:a", 0.0, 0.12)
+	tw.tween_property(line, "modulate:a", 0.0, 0.16)
+	tw.parallel().tween_property(line, "width", 1.5, 0.16)
 	tw.tween_callback(line.queue_free)
 	var tw2 := spark.create_tween()
-	tw2.tween_property(spark, "scale", Vector2(1.1, 1.1), 0.14)
-	tw2.parallel().tween_property(spark, "modulate:a", 0.0, 0.14)
+	tw2.tween_property(spark, "scale", Vector2(1.6, 1.6), 0.18)
+	tw2.parallel().tween_property(spark, "modulate:a", 0.0, 0.18)
 	tw2.tween_callback(spark.queue_free)
 
 
@@ -450,6 +495,17 @@ func _spawn_explosion(pos: Vector2, scale_mul: float = 1.0, boom: Boom = Boom.BO
 			Sfx.plane_crash(self)
 		Boom.BIG:
 			Sfx.big_boom(self)
+
+
+func _camera_kick(strength: float = 4.0) -> void:
+	## Short screen nudge — juice without wrecking aim readability.
+	if camera == null:
+		return
+	var base := camera.offset
+	var kick := Vector2(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)).normalized() * strength
+	var tw := create_tween()
+	tw.tween_property(camera, "offset", base + kick, 0.04)
+	tw.tween_property(camera, "offset", base, 0.1).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 
 
 func _emit_hud() -> void:

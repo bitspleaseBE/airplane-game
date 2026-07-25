@@ -24,10 +24,10 @@ const PLANE_TYPE_TINTS := {
 
 ## Visual silhouette only — Area2D scale stays fixed so hitboxes stay fair.
 const PLANE_TYPE_SPRITE_SCALES := {
-	PlaneType.GUNSHIP: Vector2(0.9, 0.9),
-	PlaneType.BOMBER: Vector2.ONE,
-	PlaneType.STRIKE: Vector2(0.95, 0.95),
-	PlaneType.CARPET: Vector2(1.12, 1.12),
+	PlaneType.GUNSHIP: Vector2(1.05, 1.05),
+	PlaneType.BOMBER: Vector2(1.18, 1.18),
+	PlaneType.STRIKE: Vector2(1.1, 1.1),
+	PlaneType.CARPET: Vector2(1.3, 1.3),
 }
 
 const GUNSHIP_MAX_LEVEL := 5
@@ -85,7 +85,10 @@ const TURRET_BOMB_DAMAGE := 20
 
 const PLANE_SPEED := 220.0
 const PLANE_BOMB_RADIUS := 70.0
-const PLANE_SCALE := 0.9
+## Body scale for the Area2D; sprites size up further via PLANE_TYPE_SPRITE_SCALES.
+const PLANE_SCALE := 1.05
+## Flight contrail cadence (seconds between puffs while airborne).
+const PLANE_TRAIL_INTERVAL := 0.07
 
 ## Hold-to-deploy gap between birds — lighter wings scramble faster.
 const PLANE_DEPLOY_INTERVALS := {

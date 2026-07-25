@@ -384,8 +384,10 @@ func _place_turrets() -> void:
 			GameConfig.turret_cooldown_for_level(level),
 		)
 		turret.destroyed.connect(func(pos: Vector2) -> void:
-			if _main and _main.has_method("_spawn_explosion"):
-				_main._spawn_explosion(pos, 1.4, _main.Boom.BOMB)
+			if _main and _main.has_method("spawn_gun_kill_flash"):
+				_main.spawn_gun_kill_flash(pos)
+			elif _main and _main.has_method("_spawn_explosion"):
+				_main._spawn_explosion(pos, 1.7, _main.Boom.BOMB)
 		)
 
 
@@ -436,8 +438,10 @@ func _scatter_towers() -> void:
 		tower.position = pos
 		tower.configure(_main, _pick_tower_weapon(_tower_positions.size() - 1))
 		tower.destroyed.connect(func(pos2: Vector2) -> void:
-			if _main and _main.has_method("_spawn_explosion"):
-				_main._spawn_explosion(pos2, 1.2, _main.Boom.BOMB)
+			if _main and _main.has_method("spawn_gun_kill_flash"):
+				_main.spawn_gun_kill_flash(pos2)
+			elif _main and _main.has_method("_spawn_explosion"):
+				_main._spawn_explosion(pos2, 1.5, _main.Boom.BOMB)
 		)
 
 
