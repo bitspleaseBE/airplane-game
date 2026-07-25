@@ -317,7 +317,9 @@ func _ensure_contrail() -> void:
 	if parent == null:
 		return
 	_contrail_root = Node2D.new()
-	_contrail_root.z_index = 5
+	# Effects layer is z 12; plane sprites render at 16 (Planes 8 + Sprite 8).
+	# Keep the trail's effective z below every plane so planes fly over it.
+	_contrail_root.z_index = 1
 	_contrail_root.name = "Contrail"
 	parent.add_child(_contrail_root)
 	_contrail_pool.clear()
@@ -374,8 +376,8 @@ func _update_contrail(delta: float, growing: bool) -> void:
 		var fade := t * t
 		disc.visible = true
 		disc.global_position = _contrail_points[i]
-		disc.scale = Vector2.ONE * lerpf(1.35, 0.2, fade)
-		disc.color = Color(r, g, b, lerpf(0.78, 0.0, fade))
+		disc.scale = Vector2.ONE * lerpf(0.95, 0.15, fade)
+		disc.color = Color(r, g, b, lerpf(0.34, 0.0, fade))
 
 
 ## Crash-only: Kenney smoke while sizzling down.
