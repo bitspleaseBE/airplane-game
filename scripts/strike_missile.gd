@@ -44,22 +44,37 @@ func _physics_process(delta: float) -> void:
 
 
 func _emit_trail() -> void:
-	var puff := Sprite2D.new()
-	puff.texture = FxAtlas.smoke_frame(randi_range(0, 8))
-	puff.global_position = global_position - velocity.normalized() * 10.0
-	puff.scale = Vector2(0.09, 0.09)
-	puff.modulate = Color(1.0, 0.92, 0.8, 0.6)
-	puff.z_index = 5
+	var back := velocity.normalized() * 12.0
 	var parent: Node = null
 	if _main and is_instance_valid(_main):
 		parent = _main.get_node_or_null("Effects")
-	if parent:
-		parent.add_child(puff)
-	else:
-		get_tree().current_scene.add_child(puff)
+	if parent == null:
+		parent = get_tree().current_scene
+
+	# Bright exhaust streak so the missile reads against the ocean.
+	var streak := Line2D.new()
+	streak.points = PackedVector2Array([global_position, global_position - back * 1.6])
+	streak.width = 4.0
+	streak.default_color = Color(1.0, 0.75, 0.35, 0.85)
+	streak.z_index = 6
+	streak.begin_cap_mode = Line2D.LINE_CAP_ROUND
+	streak.end_cap_mode = Line2D.LINE_CAP_ROUND
+	parent.add_child(streak)
+	var tw_s := streak.create_tween()
+	tw_s.tween_property(streak, "modulate:a", 0.0, 0.22)
+	tw_s.parallel().tween_property(streak, "width", 1.0, 0.22)
+	tw_s.tween_callback(streak.queue_free)
+
+	var puff := Sprite2D.new()
+	puff.texture = FxAtlas.smoke_frame(randi_range(0, 8))
+	puff.global_position = global_position - back
+	puff.scale = Vector2(0.12, 0.12)
+	puff.modulate = Color(1.0, 0.88, 0.65, 0.7)
+	puff.z_index = 5
+	parent.add_child(puff)
 	var tw := puff.create_tween()
-	tw.tween_property(puff, "modulate:a", 0.0, 0.3)
-	tw.parallel().tween_property(puff, "scale", Vector2(0.18, 0.18), 0.3)
+	tw.tween_property(puff, "modulate:a", 0.0, 0.35)
+	tw.parallel().tween_property(puff, "scale", Vector2(0.24, 0.24), 0.35)
 	tw.tween_callback(puff.queue_free)
 
 
