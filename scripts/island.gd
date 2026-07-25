@@ -82,7 +82,15 @@ func build(level_num: int, main_ref: Node2D, quality: BakeQuality = BakeQuality.
 		island_radius = base_r
 	else:
 		island_radius = base_r * _rng.randf_range(0.78, 1.16)
+	# Outer guns need a grass ring past the fort. Tiny jittered islets
+	# (e.g. L4 missile unlock) used to starve that ring and place zero towers.
+	var want_towers := GameConfig.tower_count_range_for_level(level).y
+	if want_towers > 0:
+		island_radius = maxf(island_radius, GameConfig.ISLAND_RADIUS)
 	_grass_min_radius = lerpf(120.0, 155.0, GameConfig.level_t(level))
+	if want_towers > 0:
+		# Placement band: min_d = fort+30, max_d ≈ grass+20 → grass must clear ~125+.
+		_grass_min_radius = maxf(_grass_min_radius, GameConfig.FORT_CLEAR_RADIUS + 45.0)
 	if GameConfig.is_stronghold_level(level):
 		_grass_min_radius = lerpf(_grass_min_radius, 175.0, 0.7)
 	_coast_shape = _coast_shape_for_level(level)
@@ -410,14 +418,22 @@ func _scatter_towers() -> void:
 	_tower_positions.clear()
 	var rng_range := GameConfig.tower_count_range_for_level(level)
 	var count := _rng.randi_range(rng_range.x, rng_range.y)
+	if count <= 0:
+		return
+	# Normal spacing first; relax if the ring is tight so unlock levels
+	# never ship with zero outer guns after announcing them.
+	_place_outer_towers(count, 90.0, 72.0)
+	if _tower_positions.size() < count:
+		_place_outer_towers(count, 64.0, 52.0)
+
+
+func _place_outer_towers(count: int, peer_sep: float, turret_sep: float) -> void:
 	var center := Vector2.ZERO
 	var blocked: Array[Vector2] = _turret_positions.duplicate()
-	# Stratify angles so guns fan across the island instead of clustering.
 	var sector := TAU / float(maxi(count, 1))
 	var sector_offset := _rng.randf() * TAU
-
 	var attempts := 0
-	var slot := 0
+	var slot := _tower_positions.size()
 	while _tower_positions.size() < count and attempts < 500:
 		attempts += 1
 		var theta := sector_offset + sector * float(slot) + _rng.randf_range(-sector * 0.35, sector * 0.35)
@@ -429,19 +445,18 @@ func _scatter_towers() -> void:
 		var max_d := maxf(grass_r - 30.0, minf(sand_r - 60.0, grass_r + 20.0))
 		if max_d <= min_d:
 			continue
-		# Fan across the band — not stacked on the keep, not on the shoreline.
 		var t := _rng.randf_range(0.2, 0.95)
 		var dist := lerpf(min_d, max_d, t)
 		var pos := center + Vector2.from_angle(theta) * dist
 		var too_close := false
 		for b in blocked:
-			if pos.distance_to(b) < 72.0:
+			if pos.distance_to(b) < turret_sep:
 				too_close = true
 				break
 		if too_close:
 			continue
 		for p in _tower_positions:
-			if pos.distance_to(p) < 90.0:
+			if pos.distance_to(p) < peer_sep:
 				too_close = true
 				break
 		if too_close:
@@ -466,6 +481,8 @@ func _scatter_towers() -> void:
 func _pick_tower_weapon(index: int) -> Tower.Weapon:
 	if level >= GameConfig.FLAK_TOWER_UNLOCK_LEVEL and index == 0:
 		return Tower.Weapon.FLAK
+	if level >= GameConfig.MISSILE_TOWER_UNLOCK_LEVEL and index == 0:
+		return Tower.Weapon.MISSILE
 	var roll := _rng.randf()
 	if level >= GameConfig.FLAK_TOWER_UNLOCK_LEVEL and roll < 0.2:
 		return Tower.Weapon.FLAK
@@ -596,6 +613,9 @@ func _generate_island_shape() -> void:
 		grass_cap = big_r * 0.55
 	else:
 		grass_cap = minf(_grass_min_radius * 1.05, big_r * 0.58)
+		# Don't let the 0.58 ratio choke the gun ring on mid-size islets.
+		if GameConfig.tower_count_range_for_level(level).y > 0:
+			grass_cap = maxf(grass_cap, GameConfig.FORT_CLEAR_RADIUS + 45.0)
 
 	# Multiplicative silhouette first — this is what makes bays/crescents readable.
 	var profile := PackedFloat32Array()
