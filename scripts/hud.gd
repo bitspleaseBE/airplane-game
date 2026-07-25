@@ -521,6 +521,10 @@ func _animate_stars(stars: int) -> void:
 		_stars_tween.parallel().tween_property(icon, "scale:y", 1.12, 0.1)
 		_stars_tween.tween_property(icon, "scale:y", 1.0, 0.12).set_trans(Tween.TRANS_SINE)
 		_stars_tween.tween_interval(0.1)
+	# Bake the next bastion only after flips finish — a mid-tween WASM bake
+	# freezes the star animation and the Next button alike.
+	if not _campaign_complete and _main and _main.has_method("prep_next_bastion_after_stars"):
+		_stars_tween.tween_callback(_main.prep_next_bastion_after_stars)
 
 
 func _reveal_star(icon: TextureRect) -> void:
