@@ -1,0 +1,34 @@
+---
+description: Run the automated performance gate when developing new features
+alwaysApply: true
+---
+
+# Performance Check on New Features
+
+Bastion Bomber ships as a no-threads web export. Frame-time and bake regressions show up as jank or freezes in the browser, so performance is part of feature work — not a later cleanup step.
+
+**After implementing or changing a feature with runtime impact, run the perf gate before calling the work done:**
+
+```bash
+tools/perf_check.sh
+```
+
+Follow `.cursor/skills/perf-check/SKILL.md` for budgets, interpretation, CI vs local, and what the gate does not measure (real mobile browsers).
+
+## Required when the change touches
+
+- Shaders, materials, post-FX, particles, or draw-heavy visuals
+- Island generation, baking, scenic placement, or level activation
+- Scene structure, node counts, spawn density, combat/effects load
+- Main-loop / `_process` / `_physics_process` work, UI overlays that tick every frame
+
+## Skip only when
+
+- Pure docs, copy, comments, or skill/rule text with no runtime effect
+- Version-bump-only commits
+
+## How to treat results
+
+1. **Local FAIL** → fix the regression (or get an explicit user-approved budget tradeoff). Do not ship a silent budget raise.
+2. **CI FAIL on llvmpipe** → usually recalibrate `PERF_SCALE` in `.github/workflows/perf-check.yml` from the artifact; do not treat software-GL timings as iPhone/browser proof.
+3. Report the gate outcome (pass/fail + notable gates) when finishing feature work.

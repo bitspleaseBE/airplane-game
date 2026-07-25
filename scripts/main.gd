@@ -521,18 +521,28 @@ func _place_scenic_islands(bastion_positions: Array[Vector2]) -> void:
 		seed_key += 1
 		placed += 1
 
-	# One or two near-field satellites so early sieges aren't lonely open ocean.
-	# Keep them outside the usual spawn ring (~island radius + margin).
+	# Always put one near-field scenic off bastion 1 so the opening shot has company.
+	# Stay outside the spawn ring (~250) but inside a phone-sized viewport edge (~400).
+	var opener := bastion_positions[0] + Vector2.from_angle(rng.randf() * TAU) * rng.randf_range(300.0, 380.0)
+	if _scenic_slot_clear(opener, occupied, 280.0, GameConfig.SCENIC_SEP_FROM_SCENIC, bastion_positions.size()):
+		_spawn_scenic(opener, seed_key, rng, true)
+		occupied.append(opener)
+		seed_key += 1
+		placed += 1
+
+	# One or two extra near-field satellites on early bastions.
 	for i in mini(3, bastion_positions.size()):
 		if placed >= target:
 			break
-		if rng.randf() > 0.7:
+		if i == 0:
+			continue
+		if rng.randf() > 0.55:
 			continue
 		var anchor2: Vector2 = bastion_positions[i]
 		var ang2 := rng.randf() * TAU
-		var dist2 := rng.randf_range(420.0, 560.0)
+		var dist2 := rng.randf_range(300.0, 400.0)
 		var candidate3 := anchor2 + Vector2.from_angle(ang2) * dist2
-		if not _scenic_slot_clear(candidate3, occupied, 400.0, GameConfig.SCENIC_SEP_FROM_SCENIC, bastion_positions.size()):
+		if not _scenic_slot_clear(candidate3, occupied, 280.0, GameConfig.SCENIC_SEP_FROM_SCENIC, bastion_positions.size()):
 			continue
 		_spawn_scenic(candidate3, seed_key, rng)
 		occupied.append(candidate3)
@@ -569,18 +579,21 @@ func _scenic_slot_clear(
 	return true
 
 
-func _spawn_scenic(pos: Vector2, seed_key: int, rng: RandomNumberGenerator) -> void:
+func _spawn_scenic(pos: Vector2, seed_key: int, rng: RandomNumberGenerator, immediate: bool = false) -> void:
 	var island: Island = _island_scene.instantiate()
 	islands_root.add_child(island)
 	island.global_position = pos
-	island.visible = false
 	var radius := rng.randf_range(GameConfig.SCENIC_RADIUS_MIN, GameConfig.SCENIC_RADIUS_MAX)
 	_scenic_islands.append(island)
-	# Queue coarse bake so boot stays snappy; shape is tiny so one-per-frame is fine.
-	_pending_scenic_builds.append(_scenic_islands.size() - 1)
-	# Stash seed/radius on the node via meta until drain builds it.
-	island.set_meta("scenic_seed", seed_key)
-	island.set_meta("scenic_radius", radius)
+	if immediate:
+		island.build_scenic(seed_key, radius, self, Island.BakeQuality.COARSE)
+		island.visible = true
+	else:
+		island.visible = false
+		# Queue coarse bake so boot stays snappy; shape is tiny so one-per-frame is fine.
+		_pending_scenic_builds.append(_scenic_islands.size() - 1)
+		island.set_meta("scenic_seed", seed_key)
+		island.set_meta("scenic_radius", radius)
 
 
 func _drain_island_build_queue() -> void:
@@ -677,6 +690,8 @@ func _activate_level(level: int, pan: bool) -> void:
 
 	_active_island = _islands[current_level - 1]
 	active_center = _active_island.get_center()
+	# Coarse async can still be empty when jumping levels — force a ready beach.
+	_active_island.ensure_hires_ready()
 	_active_island.set_active(true)
 	_wire_active_island()
 
