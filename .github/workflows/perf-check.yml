@@ -1,0 +1,66 @@
+# Performance gate: runs tools/perf_check.sh on a software renderer.
+#
+# The runner has no GPU — Godot renders through xvfb + Mesa llvmpipe, which is
+# roughly an order of magnitude slower than the reference machine, so budgets
+# are widened with PERF_SCALE. If this job fails right after a runner-image
+# update (not a code change), recalibrate PERF_SCALE from the report.json
+# artifact instead of touching the script defaults.
+# Gate definitions live in .cursor/skills/perf-check/SKILL.md.
+
+name: Perf Check
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  GODOT_VERSION: "4.7.1"
+  GODOT_STATUS: "stable"
+  # llvmpipe calibration from PR #1 artifacts (~149ms idle p95 / 10ms local
+  # budget ≈ 15×, plus ~25% runner headroom). Recalibrate from report.json
+  # after runner-image changes — do not touch script default budgets.
+  PERF_SCALE: "19"
+
+jobs:
+  perf:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache Godot editor
+        id: cache-godot
+        uses: actions/cache@v4
+        with:
+          path: ~/godot
+          key: godot-${{ env.GODOT_VERSION }}-${{ env.GODOT_STATUS }}-linux-editor
+
+      - name: Download Godot editor
+        if: steps.cache-godot.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/godot
+          curl -L -o /tmp/godot.zip \
+            "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-${GODOT_STATUS}/Godot_v${GODOT_VERSION}-${GODOT_STATUS}_linux.x86_64.zip"
+          unzip -o /tmp/godot.zip -d ~/godot
+          mv ~/godot/Godot_v${GODOT_VERSION}-${GODOT_STATUS}_linux.x86_64 ~/godot/godot
+          chmod +x ~/godot/godot
+
+      - name: Install virtual display + software GL
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb mesa-utils libgl1-mesa-dri
+
+      - name: Import project (warm-up .godot cache)
+        run: ~/godot/godot --headless --import || true
+
+      - name: Run perf gate
+        run: GODOT=~/godot/godot tools/perf_check.sh
+
+      - name: Upload perf report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-report
+          path: playtest/perf/
+          if-no-files-found: ignore

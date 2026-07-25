@@ -179,6 +179,21 @@ func prefetch_hires() -> void:
 	_start_bake_async(true)
 
 
+## Block until a hi-res beach texture exists — used when activating a bastion.
+func ensure_hires_ready() -> void:
+	if not _built or _hires_done:
+		return
+	# Invalidate any in-flight coarse/hires worker, then bake sync on the main thread.
+	_bake_gen += 1
+	_hires_baking = false
+	_bake_task_id = -1
+	var img := _render_island_image(ISLAND_IMG_SCALE_ACTIVE)
+	if _base_sprite and is_instance_valid(_base_sprite):
+		_base_sprite.texture = ImageTexture.create_from_image(img)
+		_base_sprite.scale = Vector2.ONE * ISLAND_IMG_SCALE_ACTIVE
+	_hires_done = true
+
+
 func reset_for_retry() -> void:
 	# Keep the silhouette; reshuffle only living defenses.
 	_rng.seed = hash("bastion_%d_retry" % level)
@@ -560,6 +575,12 @@ func _generate_island_shape() -> void:
 	var grass_base := big_r * _rng.randf_range(0.46, 0.56)
 	var sand_base := big_r * _rng.randf_range(0.82, 0.94)
 	var axis := _rng.randf() * TAU
+	# Dominant wind/wave direction: fat sheltered beaches leeward (downwind),
+	# thin wave-cut shelves windward. Arms/spits grow with the wind.
+	var wind := axis + _rng.randf_range(-0.5, 0.5)
+	if _coast_shape == CoastShape.ARM or _coast_shape == CoastShape.HOOK or _coast_shape == CoastShape.PENINSULA:
+		# Spits are wind-built — align the arm with the wind, not against it.
+		wind = axis + _rng.randf_range(-0.25, 0.25)
 	# Mild ellipse so even "round" coasts aren't perfect disks.
 	var stretch := _rng.randf_range(0.1, 0.22)
 	# Arm / hook / peninsula may stick past the nominal radius.
@@ -568,8 +589,13 @@ func _generate_island_shape() -> void:
 		or _coast_shape == CoastShape.HOOK
 		or _coast_shape == CoastShape.PENINSULA
 	)
-	var sand_cap := big_r * (1.48 if arm_extend else 1.08)
-	var grass_cap := big_r * (0.95 if arm_extend else 0.72)
+	var sand_cap := big_r * (1.7 if arm_extend else 1.12)
+	# Grass stays a compact keep-pad — never rides out onto spits/arms.
+	var grass_cap: float
+	if scenic:
+		grass_cap = big_r * 0.55
+	else:
+		grass_cap = minf(_grass_min_radius * 1.05, big_r * 0.58)
 
 	# Multiplicative silhouette first — this is what makes bays/crescents readable.
 	var profile := PackedFloat32Array()
@@ -590,43 +616,73 @@ func _generate_island_shape() -> void:
 			_rng.randf() * TAU,
 		])
 
+	# Keep-pad grass: mild wobble only — independent of the sand silhouette.
+	var grass_pad := (
+		_grass_min_radius * _rng.randf_range(0.88, 1.0)
+		if not scenic
+		else big_r * _rng.randf_range(0.38, 0.48)
+	)
+
+	# Domain warp: bend the angle each ray samples the silhouette at, so the
+	# coast jogs sideways instead of only in/out — kills the "trig curve" look.
+	var warp_amp := 0.16 if not scenic else 0.1
+
 	for i in ISLAND_LUT_SIZE:
 		var theta := TAU * float(i) / float(ISLAND_LUT_SIZE)
 		var nx := cos(theta) * 3.0
 		var ny := sin(theta) * 3.0
-		var shape_m := profile[i]
-		# Ellipse stretch along the silhouette axis.
-		var ellipse := 1.0 + stretch * cos(2.0 * (theta - axis))
+		# Warped angle for silhouette sampling (grass pad stays unwarped).
+		var theta_w := theta + fine.get_noise_2d(nx * 0.8 + 77.0, ny * 0.8 + 77.0) * warp_amp
+		var shape_m := _lut_at(profile, theta_w)
+		var shelf_b := _lut_at(shelf_boost, theta_w)
+		# Ellipse stretch along the silhouette axis (sand only).
+		var ellipse := 1.0 + stretch * cos(2.0 * (theta_w - axis))
 		shape_m *= ellipse
-		var g := grass_base * shape_m + fine.get_noise_2d(nx, ny) * 0.028 * big_r
+		# Radial fBm on top of the warp — eroded, not authored.
+		shape_m *= 1.0 + fine.get_noise_2d(nx * 1.3 + 200.0, ny * 1.3 + 200.0) * 0.09
+
+		# Grass hugs the castle — readable target pad, never an arm of green.
+		var g := grass_pad + fine.get_noise_2d(nx, ny) * 0.04 * grass_pad
+		g += harmonics[0][1] * 0.35 * sin(harmonics[0][0] * theta + harmonics[0][3])
+		var g_floor: float = (
+			GameConfig.FORT_CLEAR_RADIUS * 0.92 if not scenic else grass_pad * 0.7
+		)
+		g = clampf(g, g_floor, grass_cap)
+
+		# Sand follows the coast silhouette — arms/spits are beach, not grass.
 		var s := sand_base * shape_m + fine.get_noise_2d(nx + 9.0, ny + 9.0) * 0.04 * big_r
 		for h in harmonics:
-			g += h[1] * sin(h[0] * theta + h[3])
-			s += h[2] * sin(h[0] * theta + h[3] + 0.7)
-		# Keep the fort clear, but let bays cut deep into the outer ring.
-		var g_floor := _grass_min_radius * lerpf(0.72, 0.92, shape_m)
-		if scenic:
-			g_floor = _grass_min_radius * 0.55
-		g = clampf(g, g_floor, grass_cap)
-		var shelf := lerpf(38.0, 110.0, shelf_boost[i])
+			s += h[2] * sin(h[0] * theta_w + h[3] + 0.7)
+		var shelf := lerpf(38.0, 110.0, shelf_b)
 		# Long beaches opposite deep bites; thin shelves inside coves.
 		if shape_m < 0.85:
 			shelf = lerpf(28.0, 48.0, shape_m)
 		if scenic:
-			shelf = lerpf(12.0, 34.0, shelf_boost[i])
+			shelf = lerpf(12.0, 34.0, shelf_b)
+		# Lee side (downwind) collects sand: wide sheltered beach. Windward
+		# side is wave-cut: tighter shelf.
+		var lee := 0.5 + 0.5 * cos(theta - wind)
+		shelf *= lerpf(0.72, 1.3, lee)
 		# Erratic beach width so the sand ring never reads as concentric.
 		shelf += fine.get_noise_2d(nx * 1.7 + 40.0, ny * 1.7 + 40.0) * (8.0 if scenic else 20.0)
-		s = clampf(s, g + shelf * 0.85, minf(sand_cap, g + shelf + 28.0))
+		# Arms: sand must clear the keep-pad with a real beach, then stretch out.
+		var sand_min := g + (22.0 if scenic else 36.0)
+		s = maxf(s, sand_min + shelf * 0.35)
+		s = clampf(s, sand_min, sand_cap)
 		# Prefer the profiled sand when the shelf boost asks for a wide beach.
-		if shelf_boost[i] > 0.55:
+		if shelf_b > 0.55:
 			s = maxf(s, g + shelf)
 		_grass_lut[i] = g
 		_sand_lut[i] = minf(s, sand_cap)
 
 	# Kill only pixel-level wiggle; keep the chunky erratic bumps.
-	_smooth_lut(_grass_lut, 2)
-	_smooth_lut(_sand_lut, 2)
+	# Arm silhouettes need fewer passes or the spit melts back into a blob.
+	var smooth_passes := 1 if arm_extend else 2
+	_smooth_lut(_grass_lut, smooth_passes)
+	_smooth_lut(_sand_lut, smooth_passes)
 	for i in ISLAND_LUT_SIZE:
+		# Re-assert: grass never exceeds the keep-pad cap after smoothing.
+		_grass_lut[i] = minf(_grass_lut[i], grass_cap)
 		_sand_lut[i] = maxf(_sand_lut[i], _grass_lut[i] + (18.0 if scenic else 30.0))
 
 	_islets.clear()
@@ -640,7 +696,8 @@ func _generate_island_shape() -> void:
 	if want_islets and not scenic:
 		var islet_n := _rng.randi_range(1, 3) if _coast_shape == CoastShape.LOBED else _rng.randi_range(1, 2)
 		for i in islet_n:
-			var ang := axis + PI + _rng.randf_range(-1.0, 1.0)
+			# Fragments continue the spit downwind — broken-off, not sprinkled.
+			var ang := wind + _rng.randf_range(-0.6, 0.6)
 			if _coast_shape == CoastShape.LOBED:
 				ang = axis + TAU * float(i) / 3.0 + _rng.randf_range(-0.3, 0.3)
 			elif _coast_shape == CoastShape.ARM or _coast_shape == CoastShape.HOOK:
@@ -653,20 +710,67 @@ func _generate_island_shape() -> void:
 				continue
 			_islets.append([Vector2.from_angle(ang) * _rng.randf_range(lo, hi), islet_r])
 
-	# Shallow lobes: irregular turquoise patches that connect to the shelf
-	# instead of tracing the sand rim 1:1.
+	# Shallow lobes: irregular turquoise patches that connect to the shelf.
+	# Sandbars drift downwind, so bias placement toward the lee side.
 	_shallow_lobes.clear()
 	var lobe_n := _rng.randi_range(3, 5) if scenic else _rng.randi_range(4, 7)
 	for i in lobe_n:
-		var ang := axis + TAU * float(i) / float(lobe_n) + _rng.randf_range(-0.7, 0.7)
+		var ang: float
+		if _rng.randf() < 0.6:
+			# Lee cluster: within ~80° of the wind direction.
+			ang = wind + _rng.randf_range(-1.4, 1.4) * 0.55
+		else:
+			ang = axis + TAU * float(i) / float(lobe_n) + _rng.randf_range(-0.7, 0.7)
 		var sand_r := _lut_at(_sand_lut, ang)
 		var lobe_r := _rng.randf_range(24.0, 55.0) if scenic else _rng.randf_range(32.0, 70.0)
-		var d := sand_r + _rng.randf_range(2.0, 34.0)
+		# Lee lobes sit further out (drifting bar); windward ones hug the surf.
+		var lee_l := 0.5 + 0.5 * cos(ang - wind)
+		var d := sand_r + _rng.randf_range(2.0, 12.0 + 30.0 * lee_l)
 		_shallow_lobes.append([Vector2.from_angle(ang) * d, lobe_r])
 
 
 ## Writes a 0.55–1.6 radius multiplier and a 0–1 beach-width boost per LUT sample.
 func _build_coast_profile(profile: PackedFloat32Array, shelf_boost: PackedFloat32Array, axis: float) -> void:
+	# Arm-like shapes are chains of gaussian bumps — each segment drifts
+	# sideways and narrows, like a wind-built sand spit accreting seaward.
+	# Gaussians (not linear tents) keep shoulders and tips rounded.
+	var arm_bumps: Array = []
+	if (
+		_coast_shape == CoastShape.ARM
+		or _coast_shape == CoastShape.HOOK
+		or _coast_shape == CoastShape.PENINSULA
+	):
+		var bend_dir := 1.0 if _rng.randf() < 0.5 else -1.0
+		var seg_n := 3
+		var seg_ang := 0.0
+		var reach := 1.22
+		var width := 0.48
+		# Per-shape character: peninsula = short/broad, arm = long/straightish,
+		# hook = long with a hard sideways drift.
+		var bend_scale := 0.5
+		match _coast_shape:
+			CoastShape.PENINSULA:
+				seg_n = 2
+				reach = 1.28
+				width = 0.56
+				bend_scale = 0.4
+			CoastShape.ARM:
+				bend_scale = 0.55
+			CoastShape.HOOK:
+				bend_scale = 1.0
+		for s in seg_n:
+			# Jitter each segment so no two arms share a silhouette.
+			arm_bumps.append([
+				seg_ang,
+				reach * _rng.randf_range(0.96, 1.04),
+				width * _rng.randf_range(0.88, 1.12),
+			])
+			seg_ang += bend_dir * _rng.randf_range(0.2, 0.38) * bend_scale
+			reach += _rng.randf_range(0.13, 0.2)
+			width *= _rng.randf_range(0.62, 0.76)
+		# Small opposing stub so the island doesn't look glued to one side.
+		arm_bumps.append([PI + _rng.randf_range(-0.3, 0.3), 0.98, 0.34])
+
 	for i in ISLAND_LUT_SIZE:
 		var theta := TAU * float(i) / float(ISLAND_LUT_SIZE)
 		var m := 1.0
@@ -698,34 +802,17 @@ func _build_coast_profile(profile: PackedFloat32Array, shelf_boost: PackedFloat3
 				var inner := exp(-0.5 * pow(wrapf(theta - axis - PI, -PI, PI) / 0.85, 2.0))
 				m -= 0.22 * inner
 				shelf = lerpf(0.35, 1.0, 1.0 - inner)
-			CoastShape.PENINSULA:
-				# Compact body + broad headland that reads as a real arm.
-				var d := absf(wrapf(theta - axis, -PI, PI))
-				var tip := exp(-0.5 * pow(d / 0.42, 2.0))
-				m = lerpf(0.72, 0.92, 0.5 + 0.5 * cos(theta - axis))
-				m = maxf(m, lerpf(0.95, 1.48, tip))
-				shelf = lerpf(0.45, 0.95, tip)
-			CoastShape.ARM:
-				# Compact body with a long thin tropical spit — the classic arm.
-				var d := absf(wrapf(theta - axis, -PI, PI))
-				var spit := exp(-0.5 * pow(d / 0.22, 2.0))
-				var body := lerpf(0.62, 0.88, 0.5 + 0.5 * cos(theta - axis + PI * 0.15))
-				m = maxf(body, lerpf(1.0, 1.62, pow(spit, 0.85)))
-				# Tiny opposing stub so it doesn't look glued on one side.
-				var stub := exp(-0.5 * pow(wrapf(theta - axis - PI, -PI, PI) / 0.38, 2.0))
-				m = maxf(m, lerpf(0.7, 1.05, stub * 0.55))
+			CoastShape.PENINSULA, CoastShape.ARM, CoastShape.HOOK:
+				# Rounded body + the chained gaussian spit built above.
+				var body := lerpf(0.64, 0.82, 0.5 + 0.5 * cos(theta - axis + PI * 0.2))
+				m = body
+				var spit := 0.0
+				for b in arm_bumps:
+					var d := absf(wrapf(theta - axis - b[0], -PI, PI))
+					var gauss: float = exp(-0.5 * pow(d / b[2], 2.0))
+					m = maxf(m, lerpf(body, b[1], gauss))
+					spit = maxf(spit, gauss)
 				shelf = lerpf(0.35, 1.0, spit)
-			CoastShape.HOOK:
-				# Curved reef arm: tip bends off-axis like a broken atoll fragment.
-				var tip_ang := axis + 0.55
-				var d_base := absf(wrapf(theta - axis, -PI, PI))
-				var d_tip := absf(wrapf(theta - tip_ang, -PI, PI))
-				var base_arm := exp(-0.5 * pow(d_base / 0.32, 2.0))
-				var tip := exp(-0.5 * pow(d_tip / 0.28, 2.0))
-				m = lerpf(0.64, 0.9, 0.5 + 0.5 * cos(theta - axis))
-				m = maxf(m, lerpf(0.95, 1.35, base_arm))
-				m = maxf(m, lerpf(1.05, 1.58, tip))
-				shelf = lerpf(0.4, 0.98, maxf(base_arm, tip))
 			CoastShape.KIDNEY:
 				var along := cos(theta - axis)
 				m = lerpf(0.7, 1.15, absf(along))
@@ -743,7 +830,7 @@ func _build_coast_profile(profile: PackedFloat32Array, shelf_boost: PackedFloat3
 				var tri := 0.5 + 0.5 * cos(3.0 * (theta - axis))
 				m = lerpf(0.68, 1.32, pow(tri, 1.1))
 				shelf = lerpf(0.45, 0.9, tri)
-		profile[i] = clampf(m, 0.52, 1.65)
+		profile[i] = clampf(m, 0.48, 1.75)
 		shelf_boost[i] = clampf(shelf, 0.0, 1.0)
 
 
