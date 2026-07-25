@@ -320,6 +320,23 @@ func _set_won() -> void:
 	)
 	var campaign_done := current_level >= GameConfig.LEVEL_COUNT
 	game_won.emit(last_stars, campaign_done)
+	# Bake the next beach while the after-action modal is up, so "Next bastion"
+	# can close + pan immediately instead of hitching on a WASM pixel bake.
+	if not campaign_done:
+		get_tree().create_timer(0.45).timeout.connect(_prep_next_bastion, CONNECT_ONE_SHOT)
+
+
+func _prep_next_bastion() -> void:
+	if state != State.WON or current_level >= GameConfig.LEVEL_COUNT:
+		return
+	var idx := current_level  # 0-based index of the next bastion
+	_ensure_island_built(idx, Island.BakeQuality.COARSE)
+	if idx < 0 or idx >= _islands.size():
+		return
+	var isl: Island = _islands[idx]
+	if isl and is_instance_valid(isl):
+		isl.ensure_hires_ready()
+	_apply_open_ocean()
 
 
 func _set_lost() -> void:
@@ -748,17 +765,18 @@ func _activate_level(level: int, pan: bool, sync_beach: bool = true) -> void:
 		_active_island.set_active(false)
 		_disconnect_island(_active_island)
 
-	# Ensure the target bastion exists before we aim the camera at it.
-	_ensure_island_built(
-		current_level - 1,
-		Island.BakeQuality.HIRES if sync_beach else Island.BakeQuality.COARSE,
-	)
+	# Shape must exist so we know where to aim the camera. Never sync-bake a
+	# hi-res beach before a pan — that freezes the UI on the won-modal frame.
+	var build_q := Island.BakeQuality.NONE
+	if not pan:
+		build_q = Island.BakeQuality.HIRES if sync_beach else Island.BakeQuality.COARSE
+	_ensure_island_built(current_level - 1, build_q)
 
 	_active_island = _islands[current_level - 1]
 	active_center = _active_island.get_center()
-	# Coarse async can still be empty when jumping levels — force a ready beach.
-	# Boot passes sync_beach=false so WASM doesn't freeze on the load splash.
-	if sync_beach:
+	# Snap / boot: beach ready before play. Pan: upgrade after the camera moves
+	# (usually already prepped while the win modal was open).
+	if sync_beach and not pan:
 		_active_island.ensure_hires_ready()
 	_active_island.set_active(true)
 	_wire_active_island()
@@ -768,12 +786,14 @@ func _activate_level(level: int, pan: bool, sync_beach: bool = true) -> void:
 	active_planes = 0
 	_reset_siege_stats()
 
-	# Prefetch the next beach texture during this siege so Next isn't a hitch.
+	# Prefetch the following bastion's shell during this siege.
 	if current_level < GameConfig.LEVEL_COUNT:
 		_ensure_island_built(current_level, Island.BakeQuality.NONE)
 		var next_island: Island = _islands[current_level]
 		if next_island:
 			next_island.prefetch_hires()
+
+	level_changed.emit(current_level)
 
 	if pan:
 		state = State.TRANSITION
@@ -781,16 +801,19 @@ func _activate_level(level: int, pan: bool, sync_beach: bool = true) -> void:
 		tw.set_ease(Tween.EASE_IN_OUT)
 		tw.set_trans(Tween.TRANS_CUBIC)
 		tw.tween_property(camera, "position", active_center, GameConfig.CAMERA_PAN_DURATION)
-		tw.tween_callback(func() -> void:
-			state = State.PLAYING
-			_emit_hud()
-		)
+		tw.tween_callback(_finish_pan_to_bastion)
 	else:
 		camera.position = active_center
 		state = State.PLAYING
 		_emit_hud()
 
-	level_changed.emit(current_level)
+
+func _finish_pan_to_bastion() -> void:
+	# Safety net if the player mashed Next before the win-modal bake finished.
+	if _active_island and is_instance_valid(_active_island):
+		_active_island.ensure_hires_ready()
+	state = State.PLAYING
+	_emit_hud()
 
 
 func _ensure_island_built(index: int, quality: Island.BakeQuality = Island.BakeQuality.HIRES) -> void:
