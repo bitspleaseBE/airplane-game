@@ -122,7 +122,12 @@ void fragment() {
 		// wrapping the island. Deliberately no travelling open-water component:
 		// straight crest trains across open sea look like smoke bands top-down.
 		float shoal = 1.0 - smoothstep(0.0, 470.0, shore_d);
-		float swell = sin(shore_d * -0.055 + TIME * 1.15 + chop * 2.6);
+		// sin(k*x + w*t) travels toward *decreasing* x, so crests run from open
+		// water in onto the coast. The sign matters more than it looks: with
+		// sin(k*x - w*t) the crests march seaward instead, and because the
+		// amplitude peaks at the shore the island reads as radiating energy
+		// outward rather than taking a swell.
+		float swell = sin(shore_d * 0.055 + TIME * 1.15 + chop * 2.6);
 		// Round the crests and sharpen the troughs — real swell isn't a sine.
 		swell = swell * 0.62 + 0.38 * swell * abs(swell);
 		base *= 1.0 + swell * (shoal * shoal * 0.115 * swell_strength) + chop * 0.075;

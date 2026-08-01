@@ -152,14 +152,17 @@ vec4 shade_land(vec2 p, float dist, float sand_r, float grass_r) {
 	vec3 rgb = mix(vec3(0.62, 0.90, 0.88), vec3(0.82, 0.97, 0.95), near * 0.85);
 	float alpha = shallow_a;
 
-	// Surf runs up the beach and drains back. The crest travels shoreward at the
-	// same wavelength and speed as the water shader's swell (2*PI/0.055 world units
-	// at 1.15/0.055 units per second), so the two read as one wave system even
-	// though they measure shore distance from different references. The noise term
+	// Surf runs up the beach and drains back. sin(k*x + w*t) travels toward
+	// decreasing x, so the crest arrives from open water and breaks onto the sand
+	// — the same direction and the same wavelength and speed as the water shader's
+	// swell (2*PI/0.055 world units at 1.15/0.055 units per second), so the two
+	// read as one wave system even though they measure shore distance from
+	// different references. Flipping this sign sends the surf back out to sea,
+	// which looks like the beach is pushing the water away. The noise term
 	// desynchronises the phase around the coast, so stretches of beach surge at
 	// slightly different moments instead of pulsing as one ring.
 	float surge = sin(
-		(dist - sand_r) * -0.055 + TIME * 1.15 + grain(p * 0.02 + OFF_SURGE) * 2.6
+		(dist - sand_r) * 0.055 + TIME * 1.15 + grain(p * 0.02 + OFF_SURGE) * 2.6
 	) * surf_motion;
 
 	// Foam: undulating surf, always present but uneven.
