@@ -37,9 +37,9 @@ var _active_island: Island
 var _last_keep_max_hp: int = GameConfig.KEEP_MAX_HP
 var _last_gun_count: int = 0
 var _pending_ordnance: int = 0
-## Island indices still waiting for shape/defenses + coarse texture.
+## Island indices still waiting for shape + defenses.
 var _pending_island_builds: Array[int] = []
-## Scenic indices waiting for a coarse texture bake.
+## Scenic indices waiting to be built.
 var _pending_scenic_builds: Array[int] = []
 ## Space out background bastion/scenic builds so idle frames stay responsive.
 var _build_drain_cd: float = 0.0
@@ -85,18 +85,10 @@ func _ready() -> void:
 	_apply_open_ocean()
 	_apply_clouds_enabled()
 	_sync_map_layers_to_camera()
-	# Don't sync-bake hi-res during _ready — that freezes the Godot splash for
-	# many seconds on no-threads WASM. Coarse beach first; crisp upgrade next frame.
-	_activate_level(1, false, false)
+	_activate_level(1, false)
 	hud.setup(self)
 	_emit_hud()
 	Sfx.start_island_ambient(self)
-	call_deferred("_boot_upgrade_active_beach")
-
-
-func _boot_upgrade_active_beach() -> void:
-	if _active_island and is_instance_valid(_active_island):
-		_active_island.ensure_hires_ready()
 
 
 func _process(delta: float) -> void:
@@ -105,13 +97,14 @@ func _process(delta: float) -> void:
 	# pan, a kick, or a level snap.
 	if camera and camera.position.distance_to(_ocean_uniform_pos) > OCEAN_RECULL_STEP:
 		_apply_open_ocean()
-	# Background bastion/scenic builds are heavy on web (main-thread pixel bake).
-	# Never steal frames while the player is deploying or planes are airborne.
+	# Background bastion/scenic builds still cost a coast LUT plus defence and palm
+	# nodes, so keep them off frames where the player is deploying. The old spacing
+	# was sized for the multi-hundred-millisecond pixel bake, which the beach
+	# shader removed; one build per few frames is plenty now.
 	_build_drain_cd = maxf(_build_drain_cd - delta, 0.0)
 	if active_planes <= 0 and not _holding and _build_drain_cd <= 0.0:
 		if _drain_island_build_queue():
-			# WASM shape+bake is multi-hundred ms; give gameplay several free frames.
-			_build_drain_cd = 0.45 if OS.has_feature("web") else 0.05
+			_build_drain_cd = 0.05
 	_spawn_cooldown = max(_spawn_cooldown - delta, 0.0)
 	# Safety net: if the counter is empty and nothing's airborne, settle the siege.
 	if state == State.PLAYING and planes_remaining <= 0 and active_planes <= 0:
@@ -341,26 +334,13 @@ func _set_won() -> void:
 
 
 ## Called by the HUD after the win-star flip finishes — never during the tween.
-## Pre-bakes the next beach so "Next bastion" can pan without a sync hitch.
+## Builds the next island's shape and defences so "Next bastion" pans into a
+## finished bastion. The beach itself is a shader now, so there is nothing heavy
+## left to pre-bake here.
 func prep_next_bastion_after_stars() -> void:
 	if state != State.WON or current_level >= GameConfig.LEVEL_COUNT:
 		return
-	var idx := current_level  # 0-based index of the next bastion
-	_ensure_island_built(idx, Island.BakeQuality.COARSE)
-	# Spread the heavy hi-res pass onto the next frame so this one only pays for
-	# shape + coarse (keeps the modal from feeling frozen after the last star).
-	call_deferred("_prep_next_bastion_hires", idx)
-
-
-func _prep_next_bastion_hires(idx: int) -> void:
-	if state != State.WON:
-		return
-	if idx < 0 or idx >= _islands.size():
-		return
-	var isl: Island = _islands[idx]
-	if isl and is_instance_valid(isl):
-		isl.ensure_hires_ready()
-	_apply_open_ocean()
+	_ensure_island_built(current_level)
 
 
 func _set_lost() -> void:
@@ -590,9 +570,9 @@ func _build_campaign() -> void:
 		island.global_position = positions[i]
 		_islands.append(island)
 		if i == 0:
-			# Coarse only during boot — hi-res upgrades on the first deferred frame
-			# so the splash/load bar isn't stuck behind a WASM pixel bake.
-			island.build(1, self, Island.BakeQuality.COARSE)
+			# Only the starting bastion is needed to boot; the rest trickle in from
+			# _drain_island_build_queue on idle frames.
+			island.build(1, self)
 		else:
 			_pending_island_builds.append(i)
 
@@ -636,7 +616,7 @@ func _place_scenic_islands(bastion_positions: Array[Vector2]) -> void:
 		placed += 1
 
 	# One or two near-field satellites so early sieges aren't lonely open ocean.
-	# Queue only — never sync-bake here (blocks boot on no-threads web).
+	# Queue only, so boot never pays for the whole archipelago at once.
 	for i in mini(3, bastion_positions.size()):
 		if placed >= target:
 			break
@@ -690,7 +670,7 @@ func _spawn_scenic(pos: Vector2, seed_key: int, rng: RandomNumberGenerator) -> v
 	island.visible = false
 	var radius := rng.randf_range(GameConfig.SCENIC_RADIUS_MIN, GameConfig.SCENIC_RADIUS_MAX)
 	_scenic_islands.append(island)
-	# Queue coarse bake so boot stays snappy; shape is tiny so one-per-idle-frame is fine.
+	# Queue the build so boot stays snappy; islets are tiny, one per idle frame.
 	_pending_scenic_builds.append(_scenic_islands.size() - 1)
 	island.set_meta("scenic_seed", seed_key)
 	island.set_meta("scenic_radius", radius)
@@ -703,9 +683,7 @@ func _drain_island_build_queue() -> bool:
 		if i >= 0 and i < _islands.size():
 			var island: Island = _islands[i]
 			if island and is_instance_valid(island):
-				# Off-camera bastions: shape + guns only. Beach bakes on activate
-				# (avoids no-threads web spending a full second per distant island).
-				island.build(i + 1, self, Island.BakeQuality.NONE)
+				island.build(i + 1, self)
 				_apply_open_ocean()
 				return true
 		return false
@@ -719,7 +697,7 @@ func _drain_island_build_queue() -> bool:
 		return false
 	var seed_key: int = int(scenic.get_meta("scenic_seed", si))
 	var radius: float = float(scenic.get_meta("scenic_radius", GameConfig.SCENIC_RADIUS_MIN))
-	scenic.build_scenic(seed_key, radius, self, Island.BakeQuality.COARSE)
+	scenic.build_scenic(seed_key, radius, self)
 	scenic.visible = true
 	_apply_open_ocean()
 	return true
@@ -783,25 +761,17 @@ func _island_clear_of(candidate: Vector2, existing: Array[Vector2], min_sep: flo
 	return true
 
 
-func _activate_level(level: int, pan: bool, sync_beach: bool = true) -> void:
+func _activate_level(level: int, pan: bool) -> void:
 	current_level = clampi(level, 1, GameConfig.LEVEL_COUNT)
 	if _active_island:
 		_active_island.set_active(false)
 		_disconnect_island(_active_island)
 
-	# Shape must exist so we know where to aim the camera. Never sync-bake a
-	# hi-res beach before a pan — that freezes the UI on the won-modal frame.
-	var build_q := Island.BakeQuality.NONE
-	if not pan:
-		build_q = Island.BakeQuality.HIRES if sync_beach else Island.BakeQuality.COARSE
-	_ensure_island_built(current_level - 1, build_q)
+	# Shape must exist so we know where to aim the camera.
+	_ensure_island_built(current_level - 1)
 
 	_active_island = _islands[current_level - 1]
 	active_center = _active_island.get_center()
-	# Snap / boot: beach ready before play. Pan: upgrade after the camera moves
-	# (usually already prepped while the win modal was open).
-	if sync_beach and not pan:
-		_active_island.ensure_hires_ready()
 	_active_island.set_active(true)
 	_wire_active_island()
 
@@ -810,12 +780,10 @@ func _activate_level(level: int, pan: bool, sync_beach: bool = true) -> void:
 	active_planes = 0
 	_reset_siege_stats()
 
-	# Prefetch the following bastion's shell during this siege.
+	# Build the following bastion's shell during this siege so the pan lands on a
+	# finished island.
 	if current_level < GameConfig.LEVEL_COUNT:
-		_ensure_island_built(current_level, Island.BakeQuality.NONE)
-		var next_island: Island = _islands[current_level]
-		if next_island:
-			next_island.prefetch_hires()
+		_ensure_island_built(current_level)
 
 	level_changed.emit(current_level)
 
@@ -833,14 +801,11 @@ func _activate_level(level: int, pan: bool, sync_beach: bool = true) -> void:
 
 
 func _finish_pan_to_bastion() -> void:
-	# Safety net if the player mashed Next before the win-modal bake finished.
-	if _active_island and is_instance_valid(_active_island):
-		_active_island.ensure_hires_ready()
 	state = State.PLAYING
 	_emit_hud()
 
 
-func _ensure_island_built(index: int, quality: Island.BakeQuality = Island.BakeQuality.HIRES) -> void:
+func _ensure_island_built(index: int) -> void:
 	if index < 0 or index >= _islands.size():
 		return
 	var island: Island = _islands[index]
@@ -850,7 +815,7 @@ func _ensure_island_built(index: int, quality: Island.BakeQuality = Island.BakeQ
 		return
 	# Pull this index out of the background queue and build now.
 	_pending_island_builds.erase(index)
-	island.build(index + 1, self, quality)
+	island.build(index + 1, self)
 	_apply_open_ocean()
 
 

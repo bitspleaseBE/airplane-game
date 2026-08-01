@@ -7,17 +7,33 @@ signal keep_destroyed
 signal keep_hp_changed(current: int, maximum: int)
 
 const ISLAND_LUT_SIZE := 256
-## Coarse texture for distant bastions; the active island uses near-native.
-const ISLAND_IMG_SCALE := 3.0
-const ISLAND_IMG_SCALE_ACTIVE := 1.5
 const GRASS_MIN_RADIUS_BASE := 145.0
+## Slack around the outermost sand so the shelf, foam and sandbars all fit inside
+## the beach quad. Matches the padding the old CPU bake sized its image with.
+const BEACH_PAD := 110.0
+## World-unit range the 16-bit coast LUT is normalised against. The largest
+## possible sand radius is ISLAND_RADIUS_STRONGHOLD * 1.7 = 782.
+const LUT_RANGE := 1024.0
+## Must match MAX_ISLETS / MAX_LOBES in shaders/island_beach.gdshader.
+const MAX_ISLETS := 4
+const MAX_LOBES := 8
+## Must match GRAIN_TILE in shaders/island_beach.gdshader — the input-space period
+## of the shared noise tile, which bounds a useful per-island grain offset.
+const GRAIN_TILE := 114.28571
 
-## How much beach texture to generate during build().
-enum BakeQuality {
-	NONE, ## Shape + defenses only; texture queued later.
-	COARSE, ## Async low-res (distant islands).
-	HIRES, ## Sync near-native (active bastion — ready before play).
-}
+
+## Full-bleed quad the beach shader draws into. A Sprite2D would size its quad
+## from a texture — pointless here, since the shader generates every pixel — and
+## would put the node scale in the way of local space. Drawing the rect directly
+## keeps local space equal to island-relative space.
+class BeachQuad:
+	extends Node2D
+
+	var span: float = 0.0
+
+	func _draw() -> void:
+		draw_rect(Rect2(-span * 0.5, -span * 0.5, span, span), Color.WHITE)
+
 
 ## Distinct coastline silhouettes so every bastion reads differently.
 enum CoastShape {
@@ -52,17 +68,14 @@ var _tower_positions: Array[Vector2] = []
 var _turret_positions: Array[Vector2] = []
 var _grass_min_radius: float = GRASS_MIN_RADIUS_BASE
 var _coast_shape: CoastShape = CoastShape.ROUND
-var _base_sprite: Sprite2D
-var _hires_done := false
-var _hires_baking := false
-## Bumped to discard superseded WorkerThreadPool bake results.
-var _bake_gen := 0
-var _bake_task_id := -1
+var _beach: BeachQuad
 var _built := false
 
 var _keep_scene: PackedScene = preload("res://scenes/keep.tscn")
 var _turret_scene: PackedScene = preload("res://scenes/turret.tscn")
 var _tower_scene: PackedScene = preload("res://scenes/tower.tscn")
+var _beach_shader: Shader = preload("res://shaders/island_beach.gdshader")
+var _noise_tex: Texture2D = preload("res://assets/textures/water_noise.png")
 
 @onready var land: Node2D = $Land
 @onready var keep: Keep = $Keep
@@ -70,7 +83,7 @@ var _tower_scene: PackedScene = preload("res://scenes/tower.tscn")
 @onready var towers_root: Node2D = $Towers
 
 
-func build(level_num: int, main_ref: Node2D, quality: BakeQuality = BakeQuality.COARSE) -> void:
+func build(level_num: int, main_ref: Node2D) -> void:
 	scenic = false
 	level = level_num
 	_main = main_ref
@@ -99,25 +112,18 @@ func build(level_num: int, main_ref: Node2D, quality: BakeQuality = BakeQuality.
 	_clear_defenses(false)
 
 	_generate_island_shape()
-	_bake_gen += 1
-	_hires_done = false
-	_hires_baking = false
-	_base_sprite = Sprite2D.new()
-	_base_sprite.position = Vector2.ZERO
-	_base_sprite.z_index = -2
-	land.add_child(_base_sprite)
+	_make_beach()
 
 	_place_keep()
 	_place_turrets()
 	_scatter_towers()
 	_scatter_trees()
 	_built = true
-	_finish_bake(quality)
 	set_active(false)
 
 
 ## Empty tropical islet — land + palms only. Used to break up open ocean.
-func build_scenic(seed_key: int, radius: float, main_ref: Node2D, quality: BakeQuality = BakeQuality.COARSE) -> void:
+func build_scenic(seed_key: int, radius: float, main_ref: Node2D) -> void:
 	scenic = true
 	level = 0
 	_main = main_ref
@@ -140,31 +146,81 @@ func build_scenic(seed_key: int, radius: float, main_ref: Node2D, quality: BakeQ
 	_hide_keep()
 
 	_generate_island_shape()
-	_bake_gen += 1
-	_hires_done = false
-	_hires_baking = false
-	_base_sprite = Sprite2D.new()
-	_base_sprite.position = Vector2.ZERO
-	_base_sprite.z_index = -2
-	land.add_child(_base_sprite)
+	_make_beach()
 
 	_scatter_trees()
 	_built = true
-	_finish_bake(quality)
 	set_active(false)
 
 
-func _finish_bake(quality: BakeQuality) -> void:
-	match quality:
-		BakeQuality.HIRES:
-			var img := _render_island_image(ISLAND_IMG_SCALE_ACTIVE)
-			_base_sprite.texture = ImageTexture.create_from_image(img)
-			_base_sprite.scale = Vector2.ONE * ISLAND_IMG_SCALE_ACTIVE
-			_hires_done = true
-		BakeQuality.COARSE:
-			_start_bake_async(false)
-		BakeQuality.NONE:
-			pass
+## Hand the coast over to shaders/island_beach.gdshader. This replaced a per-pixel
+## GDScript rasteriser that cost 1.3 s at level 1 and 4.3 s at level 20 on the
+## main thread — with no way off it, since the web export has no threads. There is
+## no longer a quality tier or a background pass: the beach is simply there.
+func _make_beach() -> void:
+	# build() clears Land first, which frees the previous quad — so re-check
+	# validity, not just null, or a rebuild reuses a dangling reference.
+	if _beach == null or not is_instance_valid(_beach):
+		_beach = BeachQuad.new()
+		_beach.position = Vector2.ZERO
+		_beach.z_index = -2
+		land.add_child(_beach)
+
+	# Arms, islets and sandbars all reach past the nominal radius — size the quad
+	# to the true extent so nothing is clipped.
+	var extent := island_radius
+	for i in _sand_lut.size():
+		extent = maxf(extent, _sand_lut[i])
+	for islet in _islets:
+		extent = maxf(extent, islet[0].length() + float(islet[1]))
+	for lobe in _shallow_lobes:
+		extent = maxf(extent, lobe[0].length() + float(lobe[1]))
+	_beach.span = (extent + BEACH_PAD) * 2.0
+	_beach.queue_redraw()
+
+	var mat := ShaderMaterial.new()
+	mat.shader = _beach_shader
+	mat.set_shader_parameter("coast_lut", _make_coast_lut())
+	mat.set_shader_parameter("lut_range", LUT_RANGE)
+	mat.set_shader_parameter("noise_tex", _noise_tex)
+	# Slide this island to its own patch of the shared noise tile. The old CPU bake
+	# seeded FastNoiseLite per level for the same reason — without it every island
+	# gets identical shelf bulges and wet-sand banding.
+	var grain_rng := RandomNumberGenerator.new()
+	grain_rng.seed = hash("grain_%d" % level if not scenic else "grain_scenic_%d" % _rng.seed)
+	mat.set_shader_parameter(
+		"grain_offset",
+		Vector2(grain_rng.randf(), grain_rng.randf()) * GRAIN_TILE,
+	)
+	mat.set_shader_parameter("islets", _pack_blobs(_islets, MAX_ISLETS))
+	mat.set_shader_parameter("islet_count", mini(_islets.size(), MAX_ISLETS))
+	mat.set_shader_parameter("lobes", _pack_blobs(_shallow_lobes, MAX_LOBES))
+	mat.set_shader_parameter("lobe_count", mini(_shallow_lobes.size(), MAX_LOBES))
+	_beach.material = mat
+
+
+## [centre, radius] pairs as vec3(x, y, radius) for the shader's uniform arrays.
+func _pack_blobs(blobs: Array, limit: int) -> PackedVector3Array:
+	var out := PackedVector3Array()
+	for blob in blobs:
+		if out.size() >= limit:
+			break
+		var c: Vector2 = blob[0]
+		out.append(Vector3(c.x, c.y, float(blob[1])))
+	return out
+
+
+## Coast radii as a 256x2 texture: row 0 sand, row 1 grass, each value packed
+## big-endian across R and G. 8 bits over LUT_RANGE would step the coastline in
+## 4-unit jumps, which shows as facets on the shoreline.
+func _make_coast_lut() -> ImageTexture:
+	var img := Image.create(ISLAND_LUT_SIZE, 2, false, Image.FORMAT_RGBA8)
+	for i in ISLAND_LUT_SIZE:
+		var sand := int(round(clampf(_sand_lut[i] / LUT_RANGE, 0.0, 1.0) * 65535.0))
+		var grass := int(round(clampf(_grass_lut[i] / LUT_RANGE, 0.0, 1.0) * 65535.0))
+		img.set_pixel(i, 0, Color8(sand >> 8, sand & 0xFF, 0, 255))
+		img.set_pixel(i, 1, Color8(grass >> 8, grass & 0xFF, 0, 255))
+	return ImageTexture.create_from_image(img)
 
 
 func _hide_keep() -> void:
@@ -180,31 +236,6 @@ func is_built() -> bool:
 	return _built
 
 
-## Kick a background hi-res bake so the next level has a crisp beach ready.
-func prefetch_hires() -> void:
-	if not _built or _hires_done or _hires_baking:
-		return
-	# Web export has thread_support=false — prefetch would sync-hitch combat.
-	if not _can_use_worker_threads():
-		return
-	_start_bake_async(true)
-
-
-## Block until a hi-res beach texture exists — used when activating a bastion.
-func ensure_hires_ready() -> void:
-	if not _built or _hires_done:
-		return
-	# Invalidate any in-flight coarse/hires worker, then bake sync on the main thread.
-	_bake_gen += 1
-	_hires_baking = false
-	_bake_task_id = -1
-	var img := _render_island_image(ISLAND_IMG_SCALE_ACTIVE)
-	if _base_sprite and is_instance_valid(_base_sprite):
-		_base_sprite.texture = ImageTexture.create_from_image(img)
-		_base_sprite.scale = Vector2.ONE * ISLAND_IMG_SCALE_ACTIVE
-	_hires_done = true
-
-
 func reset_for_retry() -> void:
 	# Keep the silhouette; reshuffle only living defenses.
 	_rng.seed = hash("bastion_%d_retry" % level)
@@ -217,11 +248,6 @@ func reset_for_retry() -> void:
 
 func set_active(on: bool) -> void:
 	active = on
-	# Native+threads: kick a background hi-res bake. No-threads web must not —
-	# WorkerThreadPool tasks never run until wait(), so the old await-loop hung
-	# forever, and a sync bake here would hitch every activation mid-frame.
-	if on and not _hires_done and not _hires_baking and _can_use_worker_threads():
-		_start_bake_async(true)
 	if scenic:
 		return
 	if keep:
@@ -873,244 +899,3 @@ func _lut_at(lut: PackedFloat32Array, theta: float) -> float:
 	var t := fposmod(theta, TAU) / TAU * float(ISLAND_LUT_SIZE)
 	var i := int(t) % ISLAND_LUT_SIZE
 	return lerpf(lut[i], lut[(i + 1) % ISLAND_LUT_SIZE], t - float(i))
-
-
-func _can_use_worker_threads() -> bool:
-	## Web preset sets variant/thread_support=false — OS.has_feature("threads")
-	## is false there. Polling is_task_completed without wait() deadlocks.
-	return OS.has_feature("threads")
-
-
-func _exit_tree() -> void:
-	# Workers must not touch this Node — wait so free() during rebuild can't race.
-	_bake_gen += 1
-	if _bake_task_id >= 0 and _can_use_worker_threads():
-		WorkerThreadPool.wait_for_task_completion(_bake_task_id)
-		_bake_task_id = -1
-	_hires_baking = false
-
-
-func _bake_hires() -> void:
-	## Kept for callers; routes through the threaded path.
-	_start_bake_async(true)
-
-
-func _start_bake_async(hires: bool) -> void:
-	if not is_instance_valid(self) or _base_sprite == null:
-		return
-	if hires:
-		if _hires_done or _hires_baking:
-			return
-		_hires_baking = true
-	# Bump gen so any in-flight bake's result is discarded (workers use snapshots only).
-	_bake_gen += 1
-	var gen := _bake_gen
-	var img_scale := ISLAND_IMG_SCALE_ACTIVE if hires else ISLAND_IMG_SCALE
-
-	# No-threads export (web): bake on the main thread. Never use the
-	# await-until-completed loop — tasks do not run until wait() is called.
-	if not _can_use_worker_threads():
-		var img := _render_island_image(img_scale)
-		_apply_bake_image(img, img_scale, hires, gen)
-		return
-
-	# Snapshot all inputs so the worker never touches this Node.
-	var snap_radius := island_radius
-	var snap_level := level
-	var snap_sand := _sand_lut.duplicate()
-	var snap_grass := _grass_lut.duplicate()
-	var snap_islets: Array = _islets.duplicate(true)
-	var snap_lobes: Array = _shallow_lobes.duplicate(true)
-	var result_holder: Array = []
-	_bake_task_id = WorkerThreadPool.add_task(func() -> void:
-		result_holder.append(Island.render_island_image(
-			img_scale, snap_radius, snap_level, snap_sand, snap_grass, snap_islets, snap_lobes
-		))
-	)
-	_finish_bake_async(_bake_task_id, result_holder, img_scale, hires, gen)
-
-
-func _apply_bake_image(img: Image, img_scale: float, hires: bool, gen: int) -> void:
-	if not is_instance_valid(self) or gen != _bake_gen:
-		if hires:
-			_hires_baking = false
-		return
-	if img == null:
-		if hires:
-			_hires_baking = false
-		return
-	# Don't let a late coarse bake overwrite a hi-res (or in-flight hi-res).
-	if not hires and (_hires_done or _hires_baking):
-		return
-	if _base_sprite and is_instance_valid(_base_sprite):
-		_base_sprite.texture = ImageTexture.create_from_image(img)
-		_base_sprite.scale = Vector2.ONE * img_scale
-	if hires:
-		_hires_done = true
-		_hires_baking = false
-
-
-func _finish_bake_async(
-	task_id: int, result_holder: Array, img_scale: float, hires: bool, gen: int
-) -> void:
-	# Cooperative wait: yield frames while the worker runs. Only valid when
-	# threads exist — otherwise is_task_completed stays false forever.
-	while not WorkerThreadPool.is_task_completed(task_id):
-		await get_tree().process_frame
-	WorkerThreadPool.wait_for_task_completion(task_id)
-	if _bake_task_id == task_id:
-		_bake_task_id = -1
-	if result_holder.is_empty():
-		_apply_bake_image(null, img_scale, hires, gen)
-		return
-	_apply_bake_image(result_holder[0], img_scale, hires, gen)
-
-
-## Thread-safe pixel bake — no Node access; all inputs are value snapshots.
-static func render_island_image(
-	img_scale: float,
-	p_radius: float,
-	p_level: int,
-	sand_lut: PackedFloat32Array,
-	grass_lut: PackedFloat32Array,
-	islets: Array,
-	shallow_lobes: Array,
-) -> Image:
-	var pad := 110.0
-	# Arms / islets can stick past the nominal radius — size the bake to the true extent.
-	var extent := p_radius
-	for i in sand_lut.size():
-		extent = maxf(extent, sand_lut[i])
-	for islet in islets:
-		extent = maxf(extent, islet[0].length() + float(islet[1]))
-	for lobe in shallow_lobes:
-		extent = maxf(extent, lobe[0].length() + float(lobe[1]))
-	var size := int(ceil((extent + pad) * 2.0 / img_scale))
-	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
-	var c := size * 0.5
-	var tex_noise := FastNoiseLite.new()
-	tex_noise.seed = hash("grain_%d" % p_level)
-	tex_noise.frequency = 0.14
-	tex_noise.fractal_octaves = 2
-	for y in size:
-		for x in size:
-			var p := Vector2(float(x) - c + 0.5, float(y) - c + 0.5) * img_scale
-			var dist := p.length()
-			var theta := atan2(p.y, p.x)
-			var col := _shade_island_static(
-				p, dist, _lut_at_static(sand_lut, theta), _lut_at_static(grass_lut, theta), tex_noise
-			)
-			for islet in islets:
-				var islet_dist: float = p.distance_to(islet[0])
-				var islet_r: float = islet[1]
-				if islet_dist > islet_r + 78.0:
-					continue
-				var islet_grass := islet_r * 0.55 if islet_r > 15.0 else 0.0
-				var icol := _shade_island_static(p, islet_dist, islet_r, islet_grass, tex_noise)
-				if icol.a > col.a:
-					col = icol
-			var sand_here := _lut_at_static(sand_lut, theta)
-			if dist >= sand_here - 1.0:
-				for lobe in shallow_lobes:
-					var ld: float = p.distance_to(lobe[0])
-					var lr: float = lobe[1]
-					if ld > lr:
-						continue
-					var la := (1.0 - smoothstep(lr * 0.15, lr, ld)) * 0.72
-					la *= 0.65 + 0.35 * tex_noise.get_noise_2d(p.x * 0.1 + 50.0, p.y * 0.1)
-					if la <= 0.004:
-						continue
-					var sc := Color(0.60, 0.90, 0.88).lerp(Color(0.80, 0.97, 0.95), 1.0 - ld / lr)
-					var a := maxf(col.a, la)
-					var t := la / maxf(a, 0.001)
-					col = Color(
-						lerpf(col.r, sc.r, t),
-						lerpf(col.g, sc.g, t),
-						lerpf(col.b, sc.b, t),
-						a,
-					)
-			if col.a > 0.004:
-				img.set_pixel(x, y, col)
-	return img
-
-
-static func _lut_at_static(lut: PackedFloat32Array, theta: float) -> float:
-	if lut.is_empty():
-		return 0.0
-	var n := lut.size()
-	var t := fposmod(theta, TAU) / TAU * float(n)
-	var i := int(t) % n
-	return lerpf(lut[i], lut[(i + 1) % n], t - float(i))
-
-
-static func _shade_island_static(
-	p: Vector2, dist: float, sand_r: float, grass_r: float, noise: FastNoiseLite
-) -> Color:
-	# Irregular turquoise shelf — width varies, with connected bulges,
-	# so it doesn't read as a uniform coast-hugging ring.
-	var n_lo := noise.get_noise_2d(p.x * 0.038 + 120.0, p.y * 0.038)
-	var n_mid := noise.get_noise_2d(p.x * 0.078 + 880.0, p.y * 0.078)
-	var n_bar := noise.get_noise_2d(p.x * 0.05 + 300.0, p.y * 0.05)
-	# Always a readable base shelf; noise only warps how far it reaches.
-	var shelf_w := lerpf(16.0, 44.0, 0.5 + 0.5 * n_lo)
-	shelf_w += maxf(0.0, n_mid - 0.1) * 38.0
-	var bar := maxf(0.0, n_bar - 0.1)
-	shelf_w += bar * 55.0
-	shelf_w = clampf(shelf_w, 14.0, 85.0)
-	var shallow_a := (1.0 - smoothstep(sand_r, sand_r + shelf_w, dist)) * 0.7
-	# Mild mottling — never erase the shelf.
-	shallow_a *= lerpf(0.72, 1.0, clampf(0.5 + n_mid * 0.55 + bar * 0.3, 0.0, 1.0))
-	var land_a := 1.0 - smoothstep(sand_r - 2.0, sand_r + 2.0, dist)
-	if shallow_a <= 0.004 and land_a <= 0.004:
-		return Color(0, 0, 0, 0)
-	var near := 1.0 - smoothstep(sand_r, sand_r + maxf(12.0, shelf_w * 0.5), dist)
-	var out := Color(0.62, 0.90, 0.88).lerp(Color(0.82, 0.97, 0.95), near * 0.85)
-	out.a = shallow_a
-	# Foam: undulating surf, always present but uneven.
-	var foam_w := 11.0 + noise.get_noise_2d(p.x * 0.22 + 400.0, p.y * 0.22) * 6.0
-	var foam := (1.0 - smoothstep(0.0, foam_w, absf(dist - (sand_r + 1.0)))) * 0.75
-	var foam_patch := clampf(0.5 + noise.get_noise_2d(p.x * 0.11 + 510.0, p.y * 0.11) * 0.7, 0.35, 1.0)
-	foam *= foam_patch
-	if foam > 0.01:
-		out = Color(
-			lerpf(out.r, 0.98, foam),
-			lerpf(out.g, 0.99, foam),
-			lerpf(out.b, 0.96, foam),
-			maxf(out.a, foam * 0.85),
-		)
-	if land_a > 0.004:
-		var dry := Color(0.94, 0.85, 0.60)
-		var wet_sand := Color(0.66, 0.56, 0.40)
-		# Wave-washed wet band, patchy around the coast: some stretches soaked,
-		# others nearly dry, so the dark edge never reads as a uniform ring.
-		var wave := noise.get_noise_2d(p.x * 0.18 + 250.0, p.y * 0.18) * 9.0
-		var wet_mod := clampf(0.5 + noise.get_noise_2d(p.x * 0.04 + 700.0, p.y * 0.04) * 1.1, 0.12, 1.0)
-		var wet := smoothstep(sand_r - 46.0 + wave, sand_r - 4.0, dist)
-		var col := dry.lerp(wet_sand, wet * wet * wet_mod)
-		var grain := noise.get_noise_2d(p.x, p.y) * 0.035
-		col = Color(col.r + grain, col.g + grain * 0.85, col.b + grain * 0.65)
-		if grass_r > 0.0:
-			var g := 1.0 - smoothstep(grass_r - 10.0, grass_r + 10.0, dist)
-			var glow := clampf(1.0 - dist / maxf(grass_r * 0.9, 1.0), 0.0, 1.0) * 0.55
-			var grass_col := Color(0.34, 0.60, 0.26).lerp(Color(0.55, 0.72, 0.38), glow)
-			var patch := noise.get_noise_2d(p.x * 0.3 + 900.0, p.y * 0.3) * 0.03
-			grass_col = Color(grass_col.r + patch, grass_col.g + patch, grass_col.b + patch * 0.6)
-			var rim := (1.0 - smoothstep(0.0, 12.0, absf(dist - (grass_r - 6.0)))) * 0.1
-			col = col.lerp(grass_col.darkened(rim), g)
-		out = Color(
-			lerpf(out.r, col.r, land_a),
-			lerpf(out.g, col.g, land_a),
-			lerpf(out.b, col.b, land_a),
-			land_a + out.a * (1.0 - land_a),
-		)
-	return out
-
-
-func _render_island_image(img_scale: float) -> Image:
-	return Island.render_island_image(
-		img_scale, island_radius, level, _sand_lut, _grass_lut, _islets, _shallow_lobes
-	)
-
-
-func _shade_island(p: Vector2, dist: float, sand_r: float, grass_r: float, noise: FastNoiseLite) -> Color:
-	return Island._shade_island_static(p, dist, sand_r, grass_r, noise)
