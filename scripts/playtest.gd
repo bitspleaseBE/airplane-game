@@ -21,7 +21,7 @@ extends Node
 ##   --force-campaign-win  win overlay with campaign-complete copy + totals
 ##   --squadron=N          shrink reserves to N so depleting the budget can resolve as a loss
 ##   --perf                benchmark mode: vsync off, per-frame CPU/GPU timing,
-##                         island-bake timing; writes a "perf" block to the summary
+##                         island-build timing; writes a "perf" block to the summary
 ##   --ocean=flat|off      perf attribution: flat = island_count 0 (skip the
 ##                         per-island shader loop), off = hide the ocean rect
 
@@ -420,27 +420,30 @@ func _perf_report() -> Dictionary:
 		total_ms += v
 	if total_ms > 0.0:
 		report["fps_avg"] = snappedf(float(_frame_ms.size()) * 1000.0 / total_ms, 0.1)
-	report["island_bake"] = _bake_benchmark()
+	report["island_build"] = _bake_benchmark()
 	return report
 
 
-## Time one island texture bake at both qualities — this is the exact per-pixel
-## GDScript work that runs on the main thread in the no-threads web export.
+## Time building one island from scratch — coast LUTs, defences and palms. This is
+## all that a level activation costs now that the beach is a shader; it used to
+## also rasterise the beach per pixel in GDScript (1.3 s at level 1, 4.3 s at
+## level 20) on the main thread, which no-threads web could not escape.
 func _bake_benchmark() -> Dictionary:
 	if not is_instance_valid(_main) or not _main.has_method("get_active_island"):
 		return {}
 	var isl: Island = _main.get_active_island()
 	if isl == null:
 		return {}
-	var out := {}
-	for entry in [["coarse_ms", 3.0], ["hires_ms", 1.5]]:
+	# A throwaway island, so timing never disturbs the one being played.
+	var probe: Island = load("res://scenes/island.tscn").instantiate()
+	_main.add_child(probe)
+	var best := INF
+	for rep in 3:
 		var t0 := Time.get_ticks_usec()
-		Island.render_island_image(
-			entry[1], isl.island_radius, isl.level,
-			isl._sand_lut, isl._grass_lut, isl._islets, isl._shallow_lobes,
-		)
-		out[entry[0]] = snappedf(float(Time.get_ticks_usec() - t0) / 1000.0, 0.1)
-	return out
+		probe.build(isl.level, _main)
+		best = minf(best, float(Time.get_ticks_usec() - t0) / 1000.0)
+	probe.queue_free()
+	return {"build_ms": snappedf(best, 0.1)}
 
 
 func _stats(samples: PackedFloat32Array) -> Dictionary:

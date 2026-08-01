@@ -7,7 +7,9 @@ description: Automated performance gate for Bastion Bomber (Godot 4). Run after 
 
 The game ships as a no-threads web export, so it must stay cheap: the browser
 renders the full-screen water shader on WebGL at device-pixel resolution, and
-any main-thread GDScript work (island bakes) becomes a visible freeze.
+any per-pixel GDScript work becomes a visible freeze — there is no worker thread
+to hide it on. Both the ocean and the island beaches are fragment shaders for
+exactly that reason; keep them that way.
 
 ## When to run
 
@@ -42,17 +44,21 @@ of them with `PERF_SCALE=N` on slower machines.
 | `idle_p95_ms` | p95 frame time, idle @720×1280 | 10.0 |
 | `ocean_cost_ms` | avg frame-time delta idle−flat = water-shader island-loop cost | 6.5 |
 | `combat_p95_ms` | p95 frame time under full combat load | 11.0 |
-| `bake_hires_ms` | one hi-res island texture bake (GDScript, main-thread on web) | 1200 |
-| `bake_coarse_ms` | one coarse island bake | 400 |
+| `island_build_ms` | one island built from scratch: coast LUTs, defences, palms | 20.0 |
 
 Interpretation:
 
 - `ocean_cost_ms` is the browser killer — it scales linearly with pixels and
-  runs every frame. If it grew, look at `shaders/water.gdshader` (per-island
-  loop, fbm octaves, island_count fed from `main._apply_open_ocean`).
-- `bake_*_ms` are freeze-length proxies for the web build (multiply by ~2–5×
-  for WASM). If they grew, look at `Island.render_island_image` /
-  `_shade_island_static` in `scripts/island.gd`, or the bake image scales.
+  runs every frame. If it grew, look at `shaders/water.gdshader` (the per-island
+  loop and its noise fetches) and at `Main._apply_open_ocean`, which view-culls
+  the coasts it uploads. A regression here often means the cull stopped working
+  and the shader is looping over the whole campaign again, which is what made
+  the water get steadily more expensive the further the player progressed.
+- `island_build_ms` is the level-transition freeze proxy (multiply by ~2–5× for
+  WASM). It used to be ~1300 ms at level 1 and ~4300 ms at level 20, because
+  `Island.render_island_image` rasterised each beach per pixel in GDScript. That
+  is now `shaders/island_beach.gdshader` and the metric is ~2 ms. If it jumps
+  back into the hundreds, something is rasterising on the CPU again.
 - `combat_p95_ms` ≈ `idle_p95_ms` + ~1 ms is normal; a bigger gap means
   gameplay/effects code regressed (check `frame_ms.max` in the combat
   summary for hitches vs. sustained load).
@@ -64,7 +70,7 @@ a regression proxy for the expensive paths — not a mobile-browser benchmark.
 
 | Signal | Means |
 |--------|--------|
-| Local pass on a real GPU | Unlikely to have obviously regressed idle/combat/bake/ocean cost on capable hardware |
+| Local pass on a real GPU | Unlikely to have obviously regressed idle/combat/build/ocean cost on capable hardware |
 | Local fail | Fix the change (or get an explicit budget tradeoff) before shipping |
 | CI fail on llvmpipe | Usually **calibration**, not “the game is too heavy for phones” |
 
@@ -76,19 +82,23 @@ It does **not** measure:
 - An iPhone 12 Pro (or any specific handset)
 
 For true mobile-browser numbers, export web and profile on device (or browser
-DevTools). Treat bake budgets as especially predictive for web freezes; treat
-frame-time gates as native proxies that still catch shader/gameplay regressions
-early.
+DevTools). Treat `island_build_ms` as especially predictive for web freezes;
+treat frame-time gates as native proxies that still catch shader/gameplay
+regressions early.
 
 ## Web / no-threads caveat
 
-The Web export preset has `variant/thread_support=false`. Island beach baking
-must **not** await `WorkerThreadPool.is_task_completed()` on that target —
-without threads the task never runs until `wait_for_task_completion()`, so the
-await loop hangs and gameplay hitching follows. Use sync/deferred bakes when
-`OS.has_feature("threads")` is false (see `Island._can_use_worker_threads`).
-Never sync-bake the active hi-res beach inside `_ready()` on web (freezes the
-load splash); upgrade on a deferred frame after the scene is up.
+The Web export preset has `variant/thread_support=false`, so
+`WorkerThreadPool` tasks never run until `wait_for_task_completion()` — an
+await-until-completed loop hangs outright there. Island beaches used to fight
+this with quality tiers, background prefetches and generation counters; all of
+it existed to hide a CPU rasteriser that on web could not be hidden.
+
+The rule that replaced it: **generate pixels on the GPU, not in GDScript.** If
+you need procedural imagery, write a shader and feed it small uniforms (see
+`Island._make_coast_lut`, which hands the coastline over as a 256x2 texture).
+Reach for `WorkerThreadPool` only for work that cannot be a shader, and never
+assume it will run on web.
 
 ## CI (llvmpipe) vs phones
 
@@ -106,7 +116,7 @@ Implications:
   treat CI ocean cost as a phone/WebGL forecast.
 - Do **not** read CI llvmpipe timings as “too heavy for iPhone 12 Pro.” An A14
   class GPU is far closer to a local real-GPU pass than to software GL. The
-  remaining phone risk is the web stack (WASM, WebGL, main-thread bakes), which
+  remaining phone risk is the web stack (WASM, WebGL, main-thread work), which
   this job does not run.
 
 ## When budgets fail

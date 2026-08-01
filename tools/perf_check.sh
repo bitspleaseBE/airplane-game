@@ -9,7 +9,7 @@
 #
 # Individual budget overrides (milliseconds, applied before PERF_SCALE):
 #   IDLE_P95_BUDGET_MS OCEAN_COST_BUDGET_MS COMBAT_P95_BUDGET_MS
-#   BAKE_HIRES_BUDGET_MS BAKE_COARSE_BUDGET_MS
+#   ISLAND_BUILD_BUDGET_MS
 #
 # Exit code: 0 = all gates pass, 1 = at least one gate over budget.
 set -euo pipefail
@@ -71,8 +71,7 @@ gates = [
     ("idle_p95_ms",      idle["frame_ms"]["p95"],              budget("IDLE_P95_BUDGET_MS", 10.0)),
     ("ocean_cost_ms",    ocean_cost,                           budget("OCEAN_COST_BUDGET_MS", 6.5)),
     ("combat_p95_ms",    combat["frame_ms"]["p95"],            budget("COMBAT_P95_BUDGET_MS", 11.0)),
-    ("bake_hires_ms",    idle["island_bake"]["hires_ms"],      budget("BAKE_HIRES_BUDGET_MS", 1200.0)),
-    ("bake_coarse_ms",   idle["island_bake"]["coarse_ms"],     budget("BAKE_COARSE_BUDGET_MS", 400.0)),
+    ("island_build_ms",  idle["island_build"]["build_ms"],     budget("ISLAND_BUILD_BUDGET_MS", 20.0)),
 ]
 
 print(f"=== Perf gates (720x1280, seed fixed, scale x{scale:g}) ===")
