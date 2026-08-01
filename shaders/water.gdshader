@@ -3,17 +3,30 @@ render_mode blend_mix, unshaded;
 
 /// Open ocean with optional single-island foam LUT (legacy).
 /// When open_ocean is true, only depth/variation — shores are baked into island sprites.
+///
+/// Noise comes from one baked seamless 4-octave fBm tile
+/// (assets/textures/water_noise.png, see tools/gen_water_noise.py) rather than
+/// `fract(sin(dot(...)))`. The old hash cost 4 sines per lattice corner — 12 per
+/// fBm, ~800 per pixel with the island loop — and lost precision at campaign-scale
+/// world coordinates, so the field differed per GPU and shimmered on mobile.
+/// One filtered fetch replaces each fBm call, which buys the headroom for the
+/// refracted swell and surge-driven surf below.
+///
+/// The island arrays are view-culled by Main._apply_open_ocean: only coasts whose
+/// influence reaches the screen are uploaded, so this loop runs a couple of times
+/// instead of once per island in the campaign.
 
 uniform bool open_ocean = true;
 uniform vec2 island_center = vec2(360.0, 640.0);
 uniform float island_radius = 300.0;
 uniform sampler2D radius_lut : filter_linear, repeat_enable;
 
-// Campaign islands: water shades from bright shallows near any coast to deep
-// open sea between islands.
+/// Coasts near the view. Water lightens toward any shore and deepens offshore.
+/// Sized for the worst realistic on-screen count — Main caps the upload to match.
+const int MAX_ISLANDS = 12;
 uniform int island_count = 0;
-uniform vec2 island_centers[40];
-uniform float island_radii[40];
+uniform vec2 island_centers[MAX_ISLANDS];
+uniform float island_radii[MAX_ISLANDS];
 
 uniform vec4 deep_color : source_color = vec4(0.12, 0.40, 0.68, 1.0);
 uniform vec4 ocean_color : source_color = vec4(0.22, 0.56, 0.80, 1.0);
@@ -21,37 +34,41 @@ uniform vec4 lagoon_color : source_color = vec4(0.34, 0.72, 0.80, 1.0);
 uniform vec4 shallows_color : source_color = vec4(0.50, 0.80, 0.76, 1.0);
 uniform vec4 foam_color : source_color = vec4(1.0, 1.0, 1.0, 1.0);
 
+/// Baked fBm. Linear-filtered and repeating; one tile is 16 lattice units.
+uniform sampler2D noise_tex : filter_linear, repeat_enable;
+
+/// Master gain on the wave-crest shading. 0 = flat depth ramp only.
+uniform float swell_strength = 1.0;
+
+/// One base-octave cell per unit of the sampling coordinate — matches the old
+/// integer-lattice value noise, so every tuning constant below carries over.
+const float NOISE_BASE_UV = 0.0625;
+/// The old fBm summed three octaves at 1/2 + 1/4 + 1/8, so it topped out here
+/// rather than at 1.0. The bake stores the field rescaled into the full 8-bit
+/// range; undoing that restores the distribution the constants are tuned to.
+const float NOISE_PEAK = 0.875;
+
 varying vec2 world_pos;
 
 void vertex() {
 	world_pos = (MODEL_MATRIX * vec4(VERTEX, 0.0, 1.0)).xy;
 }
 
-float hash(vec2 p) {
-	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+/// Normalised 0..1 fBm — one fetch. Prefer this for new terms; it is easier to
+/// reason about than the old skewed range.
+float fbmn(vec2 p) {
+	return texture(noise_tex, p * NOISE_BASE_UV).r;
 }
 
-float value_noise(vec2 p) {
-	vec2 i = floor(p);
-	vec2 f = fract(p);
-	vec2 u = f * f * (3.0 - 2.0 * f);
-	return mix(
-		mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),
-		mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x),
-		u.y
-	);
-}
-
+/// Drop-in for the old 3-octave fBm: same input scale, same 0..0.875 range.
 float fbm(vec2 p) {
-	float v = 0.0;
-	float a = 0.5;
-	mat2 rot = mat2(vec2(0.8, -0.6), vec2(0.6, 0.8));
-	for (int i = 0; i < 3; i++) {
-		v += a * value_noise(p);
-		p = rot * p * 2.1;
-		a *= 0.5;
-	}
-	return v;
+	return fbmn(p) * NOISE_PEAK;
+}
+
+/// fBm with features stretched along `aniso` — used for glitter paths, which run
+/// with the sun azimuth rather than sitting as round dots.
+float fbmn_aniso(vec2 p, vec2 aniso) {
+	return texture(noise_tex, p * aniso * NOISE_BASE_UV).r;
 }
 
 float lut_radius(float theta) {
@@ -63,8 +80,8 @@ void fragment() {
 	vec3 base;
 
 	if (open_ocean) {
-		// Top-down sea: depth from shore + small-scale ripples/glints.
-		// No side-view stripe trains — those look like smoke bands from above.
+		// Top-down sea: depth from the nearest shore, drifting surface chop, and
+		// swell that shoals into the coast.
 		float shore_d = 1e6;
 		for (int i = 0; i < island_count; i++) {
 			vec2 delta = world_pos - island_centers[i];
@@ -76,36 +93,65 @@ void fragment() {
 		shore_d = max(shore_d, 0.0);
 		float prox = 1.0 - smoothstep(0.0, 520.0, shore_d);
 
-		float d = mix(240.0, 48.0, prox);
-		d += (fbm(world_pos * 0.005) - 0.5) * 12.0;
+		float depth = mix(240.0, 48.0, prox);
+		depth += (fbm(world_pos * 0.005) - 0.5) * 12.0;
 
 		base = shallows_color.rgb;
-		base = mix(base, lagoon_color.rgb, smoothstep(18.0, 65.0, d));
-		base = mix(base, ocean_color.rgb, smoothstep(55.0, 130.0, d));
-		base = mix(base, deep_color.rgb, smoothstep(120.0, 250.0, d));
+		base = mix(base, lagoon_color.rgb, smoothstep(18.0, 65.0, depth));
+		base = mix(base, ocean_color.rgb, smoothstep(55.0, 130.0, depth));
+		base = mix(base, deep_color.rgb, smoothstep(120.0, 250.0, depth));
 
-		// Domain-warped ripple chop — soft surface texture from above.
-		vec2 uv = world_pos * 0.018;
-		vec2 flow_a = vec2(TIME * 0.22, TIME * 0.11);
-		vec2 flow_b = vec2(TIME * -0.14, TIME * 0.19);
+		// Domain-warped ripple chop — soft surface texture from above. Two
+		// counter-drifting layers warp each other so crests merge and split
+		// instead of sliding past as a rigid pattern.
+		vec2 uv = world_pos * 0.011;
+		vec2 flow_a = vec2(TIME * 0.16, TIME * 0.08);
+		vec2 flow_b = vec2(TIME * -0.10, TIME * 0.14);
 		vec2 warp2 = vec2(
-			fbm(uv * 0.7 + flow_a * 0.5),
-			fbm(uv * 0.7 + flow_b * 0.5 + vec2(3.1, 1.7))
+			fbmn(uv * 0.7 + flow_a * 0.5),
+			fbmn(uv * 0.7 + flow_b * 0.5 + vec2(3.1, 1.7))
 		);
-		float r1 = fbm(uv + warp2 * 1.4 + flow_a);
-		float r2 = fbm(uv * 1.7 - warp2 * 1.1 + flow_b + vec2(5.2, 9.4));
-		float chop = (r1 - 0.5) * 0.7 + (r2 - 0.5) * 0.45;
-		base *= 1.0 + chop * 0.07;
+		float r1n = fbmn(uv + warp2 * 1.4 + flow_a);
+		float r2n = fbmn(uv * 1.7 - warp2 * 1.1 + flow_b + vec2(5.2, 9.4));
+		float chop = (r1n * NOISE_PEAK - 0.5) * 0.7 + (r2n * NOISE_PEAK - 0.5) * 0.45;
 
-		// Specular sparkles on the chop.
-		float glint = pow(max(r1 * r2, 0.0), 10.0);
-		base += glint * 0.18;
+		// Swell steepens as it shoals, so crest shading rises toward the coast and
+		// dies out entirely in deep water — where the drifting chop above is the
+		// whole surface, exactly as before. Phasing the crests on shore distance
+		// is what refraction does physically, and from above it reads as swell
+		// wrapping the island. Deliberately no travelling open-water component:
+		// straight crest trains across open sea look like smoke bands top-down.
+		float shoal = 1.0 - smoothstep(0.0, 470.0, shore_d);
+		float swell = sin(shore_d * -0.055 + TIME * 1.15 + chop * 2.6);
+		// Round the crests and sharpen the troughs — real swell isn't a sine.
+		swell = swell * 0.62 + 0.38 * swell * abs(swell);
+		base *= 1.0 + swell * (shoal * shoal * 0.115 * swell_strength) + chop * 0.075;
 
-		// Thin coastal foam lace.
-		float foam_band = (1.0 - smoothstep(1.0, 14.0, shore_d)) * smoothstep(0.4, 3.0, shore_d);
-		float foam_break = smoothstep(0.4, 0.75, fbm(world_pos * 0.05 + flow_a * 2.0));
-		float foam = foam_band * foam_break * (0.55 + 0.45 * sin(TIME * 1.6 + shore_d * 0.2));
-		base = mix(base, foam_color.rgb, clamp(foam * 0.42, 0.0, 1.0));
+		// Sun glitter on the crest faces. Sampled anisotropically so highlights
+		// read as glitter paths along the sun azimuth instead of round dots, and
+		// gated on the crest so the sparkle rides in with the waves.
+		float crest = smoothstep(0.1, 0.9, swell);
+		float paths = fbmn_aniso(uv * 2.4 + flow_a * 3.0, vec2(1.0, 0.3));
+		float glint = smoothstep(0.55, 0.95, r1n * r2n * 2.0) * smoothstep(0.42, 0.88, paths);
+		base += glint * (0.10 + 0.14 * crest);
+
+		// Caustic shimmer: light bouncing off a bed close enough to see. Reuses
+		// the ripple layers, so it costs no extra samples.
+		base += smoothstep(0.86, 1.3, r1n + r2n) * shoal * 0.03;
+
+		// Nearshore wash. Deliberately soft and edgeless: island_radii is the
+		// island's *circumscribing* radius, so shore_d only marks the true coast
+		// on near-round islands — on an arm or crescent the contour can sit
+		// hundreds of units out to sea. Anything with a hard edge here (the old
+		// foam lace, or a surf line) therefore reads as a white halo detached
+		// from the beach. Real coastal foam is baked into the island sprite
+		// against the actual coastline; this only brightens the shallows so the
+		// sprite's shelf blends out into open water.
+		if (shore_d < 90.0) {
+			float breakup = smoothstep(0.30, 0.70, fbmn(world_pos * 0.05 + flow_a * 2.0));
+			float wash = 1.0 - smoothstep(0.0, 62.0 + swell * 18.0, shore_d);
+			base = mix(base, foam_color.rgb, wash * wash * mix(0.06, 0.17, breakup));
+		}
 	} else {
 		vec2 delta = world_pos - island_center;
 		float dist = length(delta);

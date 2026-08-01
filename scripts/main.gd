@@ -44,6 +44,20 @@ var _pending_scenic_builds: Array[int] = []
 ## Space out background bastion/scenic builds so idle frames stay responsive.
 var _build_drain_cd: float = 0.0
 
+## Must match MAX_ISLANDS in shaders/water.gdshader.
+const OCEAN_MAX_ISLANDS := 12
+## How far past a coast the water shader still reads it: the depth ramp reaches
+## 520 world units, the shore warp can pull the contour 45 further out, and the
+## sandbar term another 110. Coasts whose influence can't reach the drawn ocean
+## rect are left out of the upload entirely.
+const OCEAN_INFLUENCE_MARGIN := 700.0
+## Re-cull once the camera has drifted this far since the last upload. Far inside
+## the margin above, so the uploaded set is never stale enough to show.
+const OCEAN_RECULL_STEP := 64.0
+
+## Camera position the ocean uniforms were last culled for.
+var _ocean_uniform_pos := Vector2(INF, INF)
+
 @onready var camera: Camera2D = $Camera
 @onready var islands_root: Node2D = $Islands
 @onready var planes: Node2D = $Planes
@@ -87,6 +101,10 @@ func _boot_upgrade_active_beach() -> void:
 
 func _process(delta: float) -> void:
 	_sync_map_layers_to_camera()
+	# The ocean uniforms are view-culled, so they follow the camera — during a
+	# pan, a kick, or a level snap.
+	if camera and camera.position.distance_to(_ocean_uniform_pos) > OCEAN_RECULL_STEP:
+		_apply_open_ocean()
 	# Background bastion/scenic builds are heavy on web (main-thread pixel bake).
 	# Never steal frames while the player is deploying or planes are airborne.
 	_build_drain_cd = maxf(_build_drain_cd - delta, 0.0)
@@ -865,30 +883,59 @@ func _clear_combatants() -> void:
 
 
 func _apply_open_ocean() -> void:
+	## Feed nearby island coasts so water lightens near shores and deepens
+	## offshore. The shader loops over this array for every pixel, so uploading
+	## the whole campaign made the water steadily more expensive as bastions and
+	## islets came online — by level 20 it was ~30 coasts deep. Only coasts that
+	## can actually tint a drawn pixel go up, which is a couple at a time.
 	if ocean == null or ocean.material == null:
 		return
 	var mat := ocean.material as ShaderMaterial
-	if mat:
-		mat.set_shader_parameter("open_ocean", true)
-		# Feed island coasts so water lightens near shores and deepens offshore.
-		var centers := PackedVector2Array()
-		var radii := PackedFloat32Array()
-		for island in _islands:
-			if island == null or not island.is_built():
-				continue
-			centers.append(island.get_center())
-			radii.append(island.get_water_min_radius())
-		for scenic in _scenic_islands:
-			if scenic == null or not scenic.is_built():
-				continue
-			# Cap so shader array (40) never overflows with a dense campaign.
-			if centers.size() >= 40:
-				break
-			centers.append(scenic.get_center())
-			radii.append(scenic.get_water_min_radius())
-		mat.set_shader_parameter("island_centers", centers)
-		mat.set_shader_parameter("island_radii", radii)
-		mat.set_shader_parameter("island_count", centers.size())
+	if mat == null:
+		return
+	mat.set_shader_parameter("open_ocean", true)
+
+	var cam_pos: Vector2 = camera.position if camera else Vector2.ZERO
+	_ocean_uniform_pos = cam_pos
+	# Half-extent of the drawn ocean rect, matching _sync_map_layers_to_camera.
+	var half := get_viewport().get_visible_rect().size / (camera.zoom * 2.0) if camera else Vector2.ZERO
+	half += Vector2(160.0, 160.0)
+
+	# [gap outside the rect, center, radius] for every coast still in range.
+	var near: Array = []
+	for island in _islands:
+		if island == null or not island.is_built():
+			continue
+		_collect_ocean_coast(near, island, cam_pos, half)
+	for scenic in _scenic_islands:
+		if scenic == null or not scenic.is_built():
+			continue
+		_collect_ocean_coast(near, scenic, cam_pos, half)
+	# Nearest first, so hitting the cap drops the coasts that matter least
+	# instead of whichever happened to be built first.
+	near.sort_custom(func(a: Array, b: Array) -> bool: return a[0] < b[0])
+
+	var centers := PackedVector2Array()
+	var radii := PackedFloat32Array()
+	for entry in near:
+		if centers.size() >= OCEAN_MAX_ISLANDS:
+			break
+		centers.append(entry[1])
+		radii.append(entry[2])
+	mat.set_shader_parameter("island_centers", centers)
+	mat.set_shader_parameter("island_radii", radii)
+	mat.set_shader_parameter("island_count", centers.size())
+
+
+func _collect_ocean_coast(out: Array, island: Island, cam_pos: Vector2, half: Vector2) -> void:
+	var center: Vector2 = island.get_center()
+	var radius: float = island.get_water_min_radius()
+	# Distance from the island centre to the drawn rect (0 when inside it).
+	var d := (center - cam_pos).abs() - half
+	var gap := Vector2(maxf(d.x, 0.0), maxf(d.y, 0.0)).length()
+	if gap > radius + OCEAN_INFLUENCE_MARGIN:
+		return
+	out.append([gap, center, radius])
 
 
 func _apply_clouds_enabled() -> void:

@@ -1,13 +1,16 @@
-[gd_scene load_steps=9 format=3]
+[gd_scene load_steps=10 format=3]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1"]
 [ext_resource type="PackedScene" path="res://scenes/hud.tscn" id="4"]
 [ext_resource type="Shader" path="res://shaders/water.gdshader" id="5"]
 [ext_resource type="Shader" path="res://shaders/clouds.gdshader" id="6"]
+[ext_resource type="Texture2D" path="res://assets/textures/water_noise.png" id="7"]
 
 [sub_resource type="ShaderMaterial" id="WaterMat"]
 shader = ExtResource("5")
 shader_parameter/open_ocean = true
+shader_parameter/noise_tex = ExtResource("7")
+shader_parameter/swell_strength = 1.0
 shader_parameter/island_center = Vector2(360, 640)
 shader_parameter/island_radius = 300.0
 shader_parameter/deep_color = Color(0.11, 0.37, 0.65, 1)
