@@ -9,28 +9,59 @@ Four boundaries keep the game playable. Check them whenever levels, balance
 values, or player-facing text change. Gates 1 and 3 are machine-tested; gates
 2 and 4 are review checklists.
 
-## Gate 1 — Strategy curve (auto-tested)
+## Gate 1 — The attack must keep changing direction (auto-tested)
 
-Dumping the whole squadron at once (`blitz`) must be a winning strategy on
-early levels, and must stop working on later levels where smarter tactics
-(`waves`, `spread`, and future turret-first plays) still win.
+The rule is about **direction, not about which strategy loses which level**.
 
-| Level | blitz | best tactical strategy |
-|-------|-------------|------------------------|
-| 1–2   | must WIN    | must win               |
-| 3+    | must LOSE   | must win               |
+A siege flown down one bearing — pick the quiet lane, point the whole squadron
+at it, fly straight in — must not win. The player has to keep moving their
+attack around the island. The flip side matters just as much: **every bastion
+must stay winnable**. This gate exists to force variation, not to make levels
+unbeatable, so a level no strategy can clear is a failure of the gate, not a
+pass.
+
+Two harness strategies measure it:
+
+- `column` — finds the quietest bearing once, then commits the entire squadron
+  to it. The strongest straight-line attack available.
+- `flank` — re-reads the board before every deploy and moves to whatever is
+  quiet *now*. The varying-direction play.
+
+| Bastion | column | flank |
+|---------|--------|-------|
+| 1–2, and each wing's first bastion (6, 11, 16) | may win — these are meant to forgive while the player learns | must win |
+| every other bastion | must fail often, and must never be reliably cheaper than `flank` | must win |
+| milestone strongholds (10, 15, 20) | must fail | must win |
+
+Deploys are rate-limited, so tapping *faster* is not a strategy either — that
+is why the old "blitz must lose" row is gone. Blitz is just random placement at
+the rate cap; it is a useful control, not the thing under test.
+
+### If `column` starts winning again
+
+The mechanism that punishes a fixed bearing is **sector slew** in
+`scripts/turret.gd`: each corner mount traverses its whole firing sector toward
+sustained pressure and drifts back to its corner when the sky clears, so a lane
+you lean on closes behind you. Check, in order:
+
+1. `SECTOR_SLEW_SPEED` — too slow and the lane never shuts.
+2. `SECTOR_HOME_SPAN` — must be wide enough that the two mounts flanking an
+   empty corner can between them cover the 90° hole it leaves. Too narrow and
+   every three-gun bastion keeps a permanent hole that no pressure can close.
+3. Whether the level is simply loose. If a level can be won on a third of its
+   squadron, losses never bite and no placement decision can show up in the
+   result — tighten the squadron or thicken the ring before touching the slew.
 
 Run the gate:
 
 ```bash
 tools/balance_check.sh              # level 1
-LEVEL=3 tools/balance_check.sh      # once levels exist
+LEVEL=5 tools/balance_check.sh      # any level
 ```
 
-It plays the full squadron with each strategy (fixed seed) and prints one
-summary line per strategy. Compare `result` against the table. If blitz wins
-a level that should demand tactics, raise defense pressure (turret range,
-fire rate, missile count); if no strategy can win, lower it.
+**Per-seed variance is high** — a single run of each strategy proves nothing.
+Use at least 3 seeds per cell before concluding anything. (Island layout is
+seeded from the level number, so `--seed` only varies tap placement.)
 
 ## Gate 2 — One new thing per level (review)
 

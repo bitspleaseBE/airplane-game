@@ -11,7 +11,7 @@ extends Node
 ##   --planes=N|all        bombers to deploy (default 6; "all" = full squadron)
 ##   --duration=S          max run seconds before ending (default 25)
 ##   --shot-interval=S     seconds between periodic screenshots (default 3)
-##   --strategy=NAME       spread (default) | blitz | waves — see _deploy_delay
+##   --strategy=NAME       spread (default) | blitz | waves | flank | column — see _deploy_delay
 ##   --seed=N              fixed RNG seed for reproducible runs
 ##   --level=N             forwarded to the game via main.set_level(N) if it exists
 ##   --briefing            force the first-play mission briefing on screen
@@ -295,18 +295,25 @@ func _deploy_bomber(i: int) -> bool:
 	var water_min := GameConfig.WATER_MIN_RADIUS
 	if _main.has_method("active_water_min_radius"):
 		water_min = _main.active_water_min_radius()
-	# Mix near-shore lagoon taps with deep open-water taps (both must work).
-	var radius := water_min + randf_range(20.0, 420.0)
-	var world := center + Vector2.from_angle(_deploy_angle(i)) * radius
+	# Mix near-shore lagoon taps with deep open-water taps (both must work), but
+	# never past the edge of the screen: a human cannot tap water they cannot
+	# see, so measuring placements out there would flatter every strategy with
+	# deploys nobody can actually make. On the big late islands this was most of
+	# the deep band, and it showed up as spawns_via_fallback in the summary.
+	var theta := _deploy_angle(i)
+	var world := center + Vector2.from_angle(theta) * _deploy_radius(theta, water_min)
 
 	# Property may be missing if main.gd currently fails to parse; stay quiet.
 	var before: int = _main.planes_remaining if "planes_remaining" in _main else -1
 	_tap(world)
-	await get_tree().process_frame
-	await get_tree().process_frame
-	if before >= 0 and _main.planes_remaining < before:
-		_input_taps += 1
-		return true
+	# Deploys are rate-limited, and a tap during the scramble gap is parked
+	# rather than dropped — so wait out a full gap before calling it a miss.
+	var wait_frames := int(ceil((GameConfig.deploy_interval_for_level(_level) + 0.2) * 60.0))
+	for _f in wait_frames:
+		await get_tree().process_frame
+		if before >= 0 and _main.planes_remaining < before:
+			_input_taps += 1
+			return true
 	if _main.has_method("_try_spawn"):
 		# Input transform mismatch fallback: spawn through the game API instead.
 		# from_press=true — discrete taps always deploy, same as a real click.
@@ -318,11 +325,64 @@ func _deploy_bomber(i: int) -> bool:
 	return before < 0  # Unknown state: don't retry forever, assume it worked.
 
 
+## How far out to release along `theta`.
+##
+## Depth is part of the tactic, not scenery. A pilot who is reading the board
+## also releases close to the beach — every extra length of open water is
+## another second under the guns — while unthinking play scatters birds across
+## the whole visible sea. Modelling that as random for every strategy quietly
+## made the reading strategies fly 40% further under fire the moment the camera
+## started framing the bigger bastions properly.
+func _deploy_radius(theta: float, water_min: float) -> float:
+	# Never inside the sand: on a bastion wider than the view the visible limit
+	# can fall short of the shoreline, and clamping blindly would aim at land.
+	var near := water_min + 20.0
+	var far := maxf(_max_visible_radius(theta), near)
+	match _strategy:
+		"flank", "column":
+			return clampf(water_min + randf_range(20.0, 110.0), near, far)
+		_:
+			return clampf(water_min + randf_range(20.0, 420.0), near, far)
+
+
+## Furthest a deploy can sit from the bastion along `theta` and still be on
+## screen. Assumes the camera is centred on the active bastion, which it is
+## outside of level transitions.
+func _max_visible_radius(theta: float) -> float:
+	var view: Vector2 = get_viewport().get_visible_rect().size * 0.5
+	var cam: Camera2D = _main.camera if "camera" in _main else null
+	if cam:
+		view /= cam.zoom
+	view -= Vector2(56.0, 56.0)  # keep clear of the HUD edges
+	var dir := Vector2.from_angle(theta)
+	var limit := INF
+	if absf(dir.x) > 0.001:
+		limit = minf(limit, absf(view.x / dir.x))
+	if absf(dir.y) > 0.001:
+		limit = minf(limit, absf(view.y / dir.y))
+	return limit
+
+
 func _deploy_angle(i: int) -> float:
 	match _strategy:
 		"blitz":
 			# Panic-dump: mash taps anywhere around the island.
 			return randf() * TAU
+		"flank":
+			# Skilled placement proxy: send the bird in where the bastion's guns
+			# are not currently looking. This is the strategy the threat readout
+			# is meant to let a human play — if it does not beat the random
+			# strategies, placement is not yet a real decision.
+			return _coldest_angle()
+		"column":
+			# The strongest one-direction attack available: find the quietest
+			# bearing once, then commit the whole squadron to it. The campaign is
+			# supposed to answer sustained pressure from a fixed heading, so from
+			# the third bastion on this must fail — see the design-gates skill.
+			if !_column_locked:
+				_column_locked = true
+				_column_angle = _coldest_angle()
+			return _column_angle + randf_range(-0.05, 0.05)
 		"waves":
 			# Each squad of WAVE_SIZE attacks from the next side (N/E/S/W).
 			var wave := i / WAVE_SIZE
@@ -332,11 +392,64 @@ func _deploy_angle(i: int) -> float:
 			return TAU * float(i) / float(maxi(_planes_to_spawn, 1)) + randf_range(-0.15, 0.15)
 
 
+## Score every approach corridor by how much living gun attention covers the
+## run in, then pick at random from the quietest few. Mirrors what a player
+## reads off the threat wedges — and picking from a band rather than the single
+## argmin matters: always taking the one best bearing funnels the whole squadron
+## down one lane, which lets a single gun hold the lock and eat all of it.
+const FLANK_SAMPLES := 24
+const FLANK_COLD_BAND := 7
+
+## "column" locks one bearing for the whole siege.
+var _column_locked := false
+var _column_angle := 0.0
+
+
+func _coldest_angle() -> float:
+	var island: Object = _main.get_active_island() if _main.has_method("get_active_island") else null
+	if island == null or not island.has_method("living_guns"):
+		return randf() * TAU
+	var guns: Array = island.living_guns()
+	if guns.is_empty():
+		return randf() * TAU
+	var center: Vector2 = island.get_center()
+	var spawn_r: float = _main.active_water_min_radius() + 90.0
+
+	var scored: Array = []
+	for i in FLANK_SAMPLES:
+		var theta := TAU * float(i) / float(FLANK_SAMPLES)
+		var spawn := center + Vector2.from_angle(theta) * spawn_r
+		var score := 0.0
+		# Integrate threat along the whole corridor, not just at the deploy
+		# point — and past the keep as well as up to it, because the heavier
+		# wings have to fly out the far side before their payload is spent.
+		for step in 6:
+			var probe: Vector2 = spawn.lerp(center, float(step) / 5.0 * 1.3)
+			for gun in guns:
+				var to_probe: Vector2 = probe - gun.global_position
+				var d: float = to_probe.length()
+				var reach: float = gun.threat_range()
+				if d > reach:
+					continue
+				var bearing: float = to_probe.angle()
+				# A gun that cannot traverse this far is no threat here at all —
+				# the sector gaps are the main thing worth reading.
+				var span: float = gun.threat_sector_span()
+				if span > 0.0 and absf(angle_difference(gun.threat_sector_center(), bearing)) > span * 0.5:
+					continue
+				var facing: float = cos(angle_difference(gun.threat_aim(), bearing))
+				score += (0.35 + maxf(facing, 0.0)) * (1.0 - d / reach)
+		scored.append([score, theta])
+	scored.sort_custom(func(a, b): return a[0] < b[0])
+	var pick: Array = scored[randi() % mini(FLANK_COLD_BAND, scored.size())]
+	return float(pick[1]) + randf_range(-0.12, 0.12)
+
+
 func _deploy_delay(i: int) -> float:
 	# Stay just above the level's deploy gap so taps aren't eaten by cooldown.
 	var scramble: float = GameConfig.deploy_interval_for_level(_level) + 0.05
 	match _strategy:
-		"blitz":
+		"blitz", "flank", "column":
 			return scramble
 		"waves":
 			return 4.0 if i % WAVE_SIZE == 0 else scramble

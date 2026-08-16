@@ -27,19 +27,19 @@ Two sentences, max. What is this game and why is it fun?
 
 ## 4. Core loop
 
-- **The 30-second loop:** Tap water around the island to spawn a bomber; it flies toward the keep, drops a bomb if it survives, then exits. Turrets track and shoot planes that get close.
-- **Aiming:** Tap spawn point on water; plane auto-flies toward the keep (and bombs whatever is under the drop).
-- **Ammo & reload:** Fixed squadron per level (15 bombers). No regen.
+- **The 30-second loop:** Read which water the fortress's guns are covering, tap a quiet lane to scramble a bird; it flies toward the keep, delivers if it survives, then exits. Guns commit to one target at a time and can only cover their own sector, so each deploy both spends a bird and pulls attention somewhere.
+- **Aiming:** Tap spawn point on water; plane auto-flies toward the keep (and bombs whatever is under the drop). The decision is the entry corridor, not the flight.
+- **Ammo & reload:** Fixed squadron per level, plus a fixed scramble gap between birds — the rate cap is what makes each placement a choice rather than a race. No regen.
 - **Weak points / headshots:** Keep is the win target; corner turrets are optional but make bombing safer if destroyed.
 - **Between waves:** [ ] upgrade shop · [x] auto-continue · [ ] repair/ability choices
-- **The hook — what makes it OUR game (one sentence):** Drop planes around a living fortress and watch the swarm race the turrets to the keep.
+- **The hook — what makes it OUR game (one sentence):** The fortress shows you exactly where it is looking and turns to face wherever you keep hitting, so a limited squadron has to keep dancing around the island to find the next open water.
 
 ## 5. Win / lose
 
 - **Lose when:** Squadron is spent (all planes used or destroyed) and the keep still stands.
 - **Run structure:** [ ] endless + score · [ ] survive N waves = win · [x] level-based campaign
 - **Target run length:** Full game 2–5 minutes, rather too short than too long; ~30–90 seconds per level.
-- **Difficulty curve:** Harder every level, exactly one new thing per level; dumping the whole squadron at once wins early levels but must fail later ones (gates in `.cursor/skills/design-gates/`).
+- **Difficulty curve:** Harder every level, exactly one new thing per level. The load-bearing rule: **a siege flown down a single bearing must not win.** Pick one quiet lane, point the whole squadron at it and fly straight in, and the fortress traverses to meet you and shuts it — you have to keep moving the attack around the island. Early bastions and each wing's first bastion forgive this while the player learns; the milestone strongholds do not. Every bastion must still be winnable by *some* approach — the rule forces variation, it never makes a level unbeatable (gates in `.cursor/skills/design-gates/`).
 
 ## 6. Player persona
 

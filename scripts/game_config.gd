@@ -43,8 +43,11 @@ const GUNSHIP_SHOT_JITTER := 28.0
 const GUNSHIP_SPEED_MULT := 1.08
 
 ## Strike jet (levels 11–15): fires a guided missile from standoff, then banks away.
-## Standoff sits deep inside AA range (360) so the run in and out is still a gamble.
-const STRIKE_STANDOFF := 160.0
+## Standoff still sits inside AA reach so the run in and out is a gamble, but it
+## has to scale with that reach: corner guns now cover up to 470, and launching
+## at the old 160 meant the jets flew almost to the keep before releasing, which
+## is the bomber's job and got them killed doing it.
+const STRIKE_STANDOFF := 230.0
 const STRIKE_MISSILE_DAMAGE := 20
 const STRIKE_MISSILE_SPEED := 300.0
 const STRIKE_MISSILE_TURN_RATE := 4.5
@@ -58,9 +61,17 @@ const CARPET_BOMB_COUNT := 3
 const CARPET_BOMB_DAMAGE := 10
 const CARPET_BOMB_INTERVAL := 0.22
 const CARPET_BOMB_SPACING := 36.0
-## Start the pass outside bomb radius so the stick centers on the keep.
-const CARPET_START_RANGE := 130.0
-const CARPET_SPEED_MULT := 0.9
+## Where the run begins. The stick always walks across the keep itself, so this
+## sets how much fortress the bird has to cross *before* its payload is away —
+## not where the bombs land. It has to scale with the island: on the level 20
+## stronghold a 170 start meant crossing ~330 px of covered water first, on a
+## locked heading, which is the one thing a leading gunner solves perfectly.
+## The wing was losing whole squadrons without the keep taking a scratch.
+const CARPET_START_RANGE := 265.0
+## Carpet bombers overfly the whole fort on a locked heading, which makes them
+## the easiest airframe for a leading gunner to solve. They need the pace to
+## survive the run they are forced to make.
+const CARPET_SPEED_MULT := 1.2
 
 ## Stronghold evolution — staggered so no level introduces two new things.
 const MISSILE_TOWER_UNLOCK_LEVEL := 4
@@ -72,10 +83,29 @@ const FLAK_COOLDOWN := 2.4
 const FLAK_SHELL_SPEED := 320.0
 const FLAK_BURST_RADIUS := 60.0
 
-const SQUADRON_BASE := 40
-const SQUADRON_PER_LEVEL := 3
+## Squadron size is calibrated per wing rather than on one global ramp: a
+## gunship puts a fraction of a bomb on the keep, a carpet run puts three, and
+## the airframes lose birds at very different rates. Values come from measured
+## well-flown runs (tools/balance_check.sh) and are sized so a good siege ends
+## with roughly a third of the wing spare while a sloppy one runs dry — which
+## is what makes an individual deploy worth thinking about.
+## Vector2i(size at the wing's first level, growth per level within the band).
+const SQUADRON_BY_WING := {
+	PlaneType.GUNSHIP: Vector2i(36, 3),  # levels 1–5   → 36..48
+	PlaneType.BOMBER: Vector2i(38, 4),   # levels 6–10  → 38..54
+	PlaneType.STRIKE: Vector2i(42, 3),   # levels 11–15 → 42..54
+	PlaneType.CARPET: Vector2i(56, 5),   # levels 16–20 → 56..76
+}
+const SQUADRON_BASE := 36
 ## Alias for level-1 squadron (playtest / HUD defaults).
 const SQUADRON_SIZE := SQUADRON_BASE
+
+## Fractions of the squadron a win may cost for each star rating. Deriving the
+## bands from the squadron rather than from a theoretical damage-per-plane
+## figure keeps them honest: the old model assumed every bird delivered, so
+## three stars sat at roughly half the plane count anyone can actually achieve.
+const THREE_STAR_FRACTION := 0.55
+const TWO_STAR_FRACTION := 0.8
 
 const KEEP_MAX_HP := 100
 const KEEP_HP_PER_LEVEL := 4  # level 20 → 100 + 76 = 176
@@ -90,20 +120,45 @@ const PLANE_SCALE := 1.05
 ## Flight contrail cadence (seconds between puffs while airborne).
 const PLANE_TRAIL_INTERVAL := 0.07
 
-## Hold-to-deploy gap between birds — lighter wings scramble faster.
+## Gap between birds leaving the deck — lighter wings scramble faster. This
+## applies to every deploy, taps included: it is the game's only resource clock,
+## so it also sets how long the player has to read the board between decisions.
+## Fast enough to keep a siege flowing, slow enough that a deploy is a choice
+## rather than a reflex.
 const PLANE_DEPLOY_INTERVALS := {
-	PlaneType.STRIKE: 0.35,
-	PlaneType.GUNSHIP: 0.45,
-	PlaneType.BOMBER: 0.55,
-	PlaneType.CARPET: 0.75,
+	PlaneType.STRIKE: 0.5,
+	PlaneType.GUNSHIP: 0.62,
+	PlaneType.BOMBER: 0.75,
+	PlaneType.CARPET: 1.0,
 }
 
 const TURRET_RANGE := 360.0
 const TURRET_FIRE_COOLDOWN := 1.2
-## From bastion 3 up, corner guns reach farther and cycle faster so blitz dies.
+## Corner guns reach farther from bastion 3, and cycle faster from bastion 5.
+## Staggered on purpose: landing both upgrades on the same level alongside the
+## third gun and a denser tower ring made bastion 3 a wall, and broke the
+## one-new-thing-per-level rule four ways at once.
 const TURRET_RANGE_HOT := 410.0
 const TURRET_FIRE_COOLDOWN_HOT := 0.75
+const TURRET_COOLDOWN_HOT_LEVEL := 5
+## Depth of covered water a corner gun holds beyond its own shoreline. Islands
+## nearly double in radius across the campaign; a flat range meant that by the
+## late strongholds the AA envelope stopped short of the sea entirely, so the
+## approach was never contested and choosing where to come in stopped mattering.
+## Scaling reach with the island keeps the corridor a real, readable space.
+const TURRET_WATER_REACH := 105.0
+## Ceiling on that growth. Without it the late strongholds reach clear across
+## the screen, which both erases the cold water the tactic depends on and makes
+## the deep run a carpet wing has to fly simply unsurvivable.
+const TURRET_RANGE_CAP := 470.0
 const TURRET_ROTATE_SPEED := 3.5
+## How fast a barrel swings, rad/s. Deliberately slower than a plane's run: a
+## gun facing the wrong way stays wrong for long enough that the player can
+## spend that window, which is what makes tap placement a decision at all.
+const TURRET_TRAVERSE_SPEED := 1.5
+## Seconds a gun stays committed to one bird before re-picking. Long enough
+## that a decoy on the far side actually pulls the barrel off your real run.
+const TURRET_TARGET_LOCK_TIME := 1.25
 const BULLET_SPEED := 380.0
 const BULLET_DAMAGE := 1
 
@@ -161,8 +216,24 @@ func is_stronghold_level(level: int) -> bool:
 	return clampi(level, 1, LEVEL_COUNT) in STRONGHOLD_LEVELS
 
 
+## First campaign level that flies the given wing.
+func wing_band_start(plane_type: PlaneType) -> int:
+	match plane_type:
+		PlaneType.BOMBER:
+			return GUNSHIP_MAX_LEVEL + 1
+		PlaneType.STRIKE:
+			return BOMBER_MAX_LEVEL + 1
+		PlaneType.CARPET:
+			return STRIKE_MAX_LEVEL + 1
+		_:
+			return 1
+
+
 func squadron_for_level(level: int) -> int:
-	return SQUADRON_BASE + (clampi(level, 1, LEVEL_COUNT) - 1) * SQUADRON_PER_LEVEL
+	var n := clampi(level, 1, LEVEL_COUNT)
+	var wing := plane_type_for_level(n)
+	var spec: Vector2i = SQUADRON_BY_WING[wing]
+	return spec.x + (n - wing_band_start(wing)) * spec.y
 
 
 func plane_type_for_level(level: int) -> PlaneType:
@@ -223,15 +294,27 @@ func tower_count_range_for_level(level: int) -> Vector2i:
 	# L10 is still a bomber-overfly siege — keep the ring fat, not impossible.
 	var n := clampi(level, 1, LEVEL_COUNT)
 	if is_stronghold_level(n):
+		# Milestone rings are thick, but not so thick that the corridor closes
+		# entirely — a carpet wing still has to fly the whole fort to deliver.
+		# Bastion 10 is the first stronghold and the fast bomber wing punches
+		# through a thin ring whatever direction it comes from; 15 flies the
+		# fragile strike wing and was drowning in guns.
 		if n == 10:
-			return Vector2i(4, 5)
+			return Vector2i(5, 6)
 		if n == 15:
-			return Vector2i(7, 9)
-		return Vector2i(8, 10)
-	if n <= 2:
+			return Vector2i(4, 5)
+		return Vector2i(6, 7)
+	# One addition at a time through the opening bastions: L3 brings a third
+	# corner gun, L4 the first missile launcher, L5 the faster gun cycle.
+	if n <= 3:
 		return Vector2i(1, 1)
 	if n <= 5:
-		return Vector2i(3, 3) if n >= 3 else Vector2i(2, 3)
+		return Vector2i(2, 2)
+	# The bomber bastions used to thin out here: three corner guns and a couple
+	# of towers on a mid-sized island left so much slack that nothing the player
+	# did with placement showed up in the result.
+	if n <= 9:
+		return Vector2i(3, 4)
 	if n >= 16:
 		return Vector2i(4, 6)
 	if n >= FLAK_TOWER_UNLOCK_LEVEL:
@@ -243,11 +326,14 @@ func tower_count_range_for_level(level: int) -> Vector2i:
 
 
 func turret_range_for_level(level: int) -> float:
-	return TURRET_RANGE_HOT if clampi(level, 1, LEVEL_COUNT) >= 3 else TURRET_RANGE
+	var n := clampi(level, 1, LEVEL_COUNT)
+	var base := TURRET_RANGE_HOT if n >= 3 else TURRET_RANGE
+	return clampf(island_radius_for_level(n) + TURRET_WATER_REACH, base, TURRET_RANGE_CAP)
 
 
 func turret_cooldown_for_level(level: int) -> float:
-	return TURRET_FIRE_COOLDOWN_HOT if clampi(level, 1, LEVEL_COUNT) >= 3 else TURRET_FIRE_COOLDOWN
+	var n := clampi(level, 1, LEVEL_COUNT)
+	return TURRET_FIRE_COOLDOWN_HOT if n >= TURRET_COOLDOWN_HOT_LEVEL else TURRET_FIRE_COOLDOWN
 
 
 ## Rough keep punch per bird — used for star thresholds across wing types.
@@ -266,21 +352,16 @@ func expected_keep_damage_per_plane(plane_type: PlaneType) -> int:
 
 
 func three_star_max_used(
-	keep_max_hp: int, gun_count: int, squadron: int, level: int = 1
+	_keep_max_hp: int, _gun_count: int, squadron: int, _level: int = 1
 ) -> int:
-	var dmg := maxi(expected_keep_damage_per_plane(plane_type_for_level(level)), 1)
-	var cap := ceili(float(keep_max_hp) / float(dmg)) + 2 + int(gun_count / 2)
-	var one_star_min := squadron - 5
-	return mini(cap, one_star_min - 2)
+	return maxi(int(floor(float(squadron) * THREE_STAR_FRACTION)), 1)
 
 
 func stars_for_win(
 	planes_used: int, keep_max_hp: int, gun_count: int, squadron: int, level: int = 1
 ) -> int:
-	var three := three_star_max_used(keep_max_hp, gun_count, squadron, level)
-	var one_min := squadron - 5
-	if planes_used <= three:
+	if planes_used <= three_star_max_used(keep_max_hp, gun_count, squadron, level):
 		return 3
-	if planes_used >= one_min:
-		return 1
-	return 2
+	if planes_used <= int(floor(float(squadron) * TWO_STAR_FRACTION)):
+		return 2
+	return 1
