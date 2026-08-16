@@ -301,14 +301,7 @@ func _deploy_bomber(i: int) -> bool:
 	# deploys nobody can actually make. On the big late islands this was most of
 	# the deep band, and it showed up as spawns_via_fallback in the summary.
 	var theta := _deploy_angle(i)
-	var near := water_min + 20.0
-	# Clamp into the on-screen band, but never inside the sand: on a bastion
-	# wider than the view the visible limit can fall short of the shoreline
-	# entirely, and clamping blindly would aim every deploy at dry land.
-	var radius := clampf(
-		water_min + randf_range(20.0, 420.0), near, maxf(_max_visible_radius(theta), near)
-	)
-	var world := center + Vector2.from_angle(theta) * radius
+	var world := center + Vector2.from_angle(theta) * _deploy_radius(theta, water_min)
 
 	# Property may be missing if main.gd currently fails to parse; stay quiet.
 	var before: int = _main.planes_remaining if "planes_remaining" in _main else -1
@@ -330,6 +323,26 @@ func _deploy_bomber(i: int) -> bool:
 			return true
 	_missed_deploys += 1
 	return before < 0  # Unknown state: don't retry forever, assume it worked.
+
+
+## How far out to release along `theta`.
+##
+## Depth is part of the tactic, not scenery. A pilot who is reading the board
+## also releases close to the beach — every extra length of open water is
+## another second under the guns — while unthinking play scatters birds across
+## the whole visible sea. Modelling that as random for every strategy quietly
+## made the reading strategies fly 40% further under fire the moment the camera
+## started framing the bigger bastions properly.
+func _deploy_radius(theta: float, water_min: float) -> float:
+	# Never inside the sand: on a bastion wider than the view the visible limit
+	# can fall short of the shoreline, and clamping blindly would aim at land.
+	var near := water_min + 20.0
+	var far := maxf(_max_visible_radius(theta), near)
+	match _strategy:
+		"flank", "column":
+			return clampf(water_min + randf_range(20.0, 110.0), near, far)
+		_:
+			return clampf(water_min + randf_range(20.0, 420.0), near, far)
 
 
 ## Furthest a deploy can sit from the bastion along `theta` and still be on
