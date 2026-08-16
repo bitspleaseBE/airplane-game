@@ -48,6 +48,18 @@ var _pending_scenic_builds: Array[int] = []
 ## Space out background bastion/scenic builds so idle frames stay responsive.
 var _build_drain_cd: float = 0.0
 
+## Framing. The camera zooms out on the bigger bastions so the whole island
+## plus a ring of open water always fits across the screen.
+##
+## This is a playability constraint, not a look: at the default zoom the level
+## 15 and 20 islands are wider than the viewport, so there was simply no water
+## to tap to the east or west of them. Whole approach bearings did not exist,
+## which is fatal for a siege that is supposed to keep changing direction.
+const DEFAULT_ZOOM := 0.8
+const MIN_ZOOM := 0.5
+## Depth of tappable water that must stay on screen outside the sand.
+const DEPLOY_RING_MARGIN := 120.0
+
 ## Must match MAX_ISLANDS in shaders/water.gdshader.
 const OCEAN_MAX_ISLANDS := 12
 ## How far past a coast the water shader still reads it: the depth ramp reaches
@@ -810,17 +822,35 @@ func _activate_level(level: int, pan: bool) -> void:
 
 	level_changed.emit(current_level)
 
+	var zoom := _zoom_for_active_island()
 	if pan:
 		state = State.TRANSITION
 		var tw := create_tween()
 		tw.set_ease(Tween.EASE_IN_OUT)
 		tw.set_trans(Tween.TRANS_CUBIC)
 		tw.tween_property(camera, "position", active_center, GameConfig.CAMERA_PAN_DURATION)
+		tw.parallel().tween_property(camera, "zoom", Vector2(zoom, zoom), GameConfig.CAMERA_PAN_DURATION)
 		tw.tween_callback(_finish_pan_to_bastion)
 	else:
 		camera.position = active_center
+		camera.zoom = Vector2(zoom, zoom)
 		state = State.PLAYING
 		_emit_hud()
+	# The ocean cull is sized from the view rect, so a zoom change has to
+	# re-upload coasts even when the camera has not moved.
+	_apply_open_ocean()
+
+
+## Widest zoom that still shows the bastion's sand plus a deployable ring.
+func _zoom_for_active_island() -> float:
+	if _active_island == null or camera == null:
+		return DEFAULT_ZOOM
+	var view: Vector2 = get_viewport().get_visible_rect().size
+	var need: float = _active_island.get_water_min_radius() + DEPLOY_RING_MARGIN
+	if need <= 0.0:
+		return DEFAULT_ZOOM
+	var fit: float = minf(view.x, view.y) * 0.5 / need
+	return clampf(fit, MIN_ZOOM, DEFAULT_ZOOM)
 
 
 func _finish_pan_to_bastion() -> void:

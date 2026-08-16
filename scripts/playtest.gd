@@ -301,7 +301,13 @@ func _deploy_bomber(i: int) -> bool:
 	# deploys nobody can actually make. On the big late islands this was most of
 	# the deep band, and it showed up as spawns_via_fallback in the summary.
 	var theta := _deploy_angle(i)
-	var radius := minf(water_min + randf_range(20.0, 420.0), _max_visible_radius(theta))
+	var near := water_min + 20.0
+	# Clamp into the on-screen band, but never inside the sand: on a bastion
+	# wider than the view the visible limit can fall short of the shoreline
+	# entirely, and clamping blindly would aim every deploy at dry land.
+	var radius := clampf(
+		water_min + randf_range(20.0, 420.0), near, maxf(_max_visible_radius(theta), near)
+	)
 	var world := center + Vector2.from_angle(theta) * radius
 
 	# Property may be missing if main.gd currently fails to parse; stay quiet.
