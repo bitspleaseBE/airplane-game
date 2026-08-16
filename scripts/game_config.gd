@@ -43,8 +43,11 @@ const GUNSHIP_SHOT_JITTER := 28.0
 const GUNSHIP_SPEED_MULT := 1.08
 
 ## Strike jet (levels 11–15): fires a guided missile from standoff, then banks away.
-## Standoff sits deep inside AA range (360) so the run in and out is still a gamble.
-const STRIKE_STANDOFF := 160.0
+## Standoff still sits inside AA reach so the run in and out is a gamble, but it
+## has to scale with that reach: corner guns now cover up to 470, and launching
+## at the old 160 meant the jets flew almost to the keep before releasing, which
+## is the bomber's job and got them killed doing it.
+const STRIKE_STANDOFF := 230.0
 const STRIKE_MISSILE_DAMAGE := 20
 const STRIKE_MISSILE_SPEED := 300.0
 const STRIKE_MISSILE_TURN_RATE := 4.5
@@ -288,10 +291,13 @@ func tower_count_range_for_level(level: int) -> Vector2i:
 	if is_stronghold_level(n):
 		# Milestone rings are thick, but not so thick that the corridor closes
 		# entirely — a carpet wing still has to fly the whole fort to deliver.
+		# Bastion 10 is the first stronghold and the fast bomber wing punches
+		# through a thin ring whatever direction it comes from; 15 flies the
+		# fragile strike wing and was drowning in guns.
 		if n == 10:
-			return Vector2i(4, 5)
-		if n == 15:
 			return Vector2i(5, 6)
+		if n == 15:
+			return Vector2i(4, 5)
 		return Vector2i(6, 7)
 	# One addition at a time through the opening bastions: L3 brings a third
 	# corner gun, L4 the first missile launcher, L5 the faster gun cycle.
