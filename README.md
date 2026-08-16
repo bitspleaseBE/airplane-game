@@ -20,7 +20,7 @@ Read the water before you tap. Every corner gun owns a sector, drawn on the sea 
 
 Destroy the central keep to win; spend the squadron with the keep still standing and you lose. Beat a bastion to pan to the next of 20 islands.
 
-**Airframes are earned per level band:** gunships (1–5) hunt corner AA then strafe with their nose gun, bombers (6–10) drop one heavy bomb, strike jets (11–15) fire a guided missile from standoff and bank away, carpet bombers (16–20) lay three bombs along the keep track. The stronghold evolves too — missile batteries from level 4, flak airbursts from 13.
+**Airframes are earned per level band:** gunships (1–5) hunt corner AA then strafe with their nose gun, bombers (6–10) drop one heavy bomb, strike jets (11–15) fire a guided missile from standoff and bank away, carpet bombers (16–20) begin their run 265 px out and lay three bombs along the keep track. The stronghold evolves too — missile batteries from level 4, flak airbursts from 13.
 
 ## Automated playtest
 

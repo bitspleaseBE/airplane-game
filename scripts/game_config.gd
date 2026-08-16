@@ -61,8 +61,13 @@ const CARPET_BOMB_COUNT := 3
 const CARPET_BOMB_DAMAGE := 10
 const CARPET_BOMB_INTERVAL := 0.22
 const CARPET_BOMB_SPACING := 36.0
-## Start the pass outside bomb radius so the stick centers on the keep.
-const CARPET_START_RANGE := 170.0
+## Where the run begins. The stick always walks across the keep itself, so this
+## sets how much fortress the bird has to cross *before* its payload is away —
+## not where the bombs land. It has to scale with the island: on the level 20
+## stronghold a 170 start meant crossing ~330 px of covered water first, on a
+## locked heading, which is the one thing a leading gunner solves perfectly.
+## The wing was losing whole squadrons without the keep taking a scratch.
+const CARPET_START_RANGE := 265.0
 ## Carpet bombers overfly the whole fort on a locked heading, which makes them
 ## the easiest airframe for a leading gunner to solve. They need the pace to
 ## survive the run they are forced to make.
