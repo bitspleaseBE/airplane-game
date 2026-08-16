@@ -22,6 +22,24 @@ const BARREL_ART_OFFSET := PI * 0.5
 const ARC_SPAN := PI * 0.67  # ~120°
 ## Slack past the sector edge before a plane stops being worth tracking.
 const TRACK_SLACK := 0.12
+
+## The sector is not nailed down. Under sustained pressure the mount traverses
+## to meet it, and drifts back to its corner when the sky clears.
+##
+## This is what stops the game collapsing into a single decision. A fixed sector
+## makes coverage legible, but it also makes the gap between sectors permanent —
+## so the best play becomes "find the hole once, then feed the whole squadron
+## through it in a straight line", which is exactly what the campaign is meant
+## to refuse. A lane you lean on closes, and you have to keep moving.
+const SECTOR_SLEW_SPEED := 0.5
+const SECTOR_RECENTRE_SPEED := 0.16
+## How far off its corner a mount may be pulled. Wide enough that the two guns
+## flanking an empty corner mount can between them close the 90° hole it leaves
+## — otherwise every three-gun bastion keeps a lane no amount of pressure can
+## shut, and feeding the squadron down it in a straight line simply wins.
+## Still bounded, so a feint cannot drag the whole fort to one side and strip
+## the rest of the island bare.
+const SECTOR_HOME_SPAN := 1.0  # ~57°
 ## Gunners under-lead a little and scatter a little. Perfect prediction turned
 ## the slower airframes into free kills — the sector should be dangerous, not
 ## deterministic, or there is no point flying through one under any plan.
@@ -37,8 +55,10 @@ var _dead: bool = false
 var _keep_center: Vector2 = GameConfig.ISLAND_CENTER
 var _range: float = GameConfig.TURRET_RANGE
 var _cooldown: float = GameConfig.TURRET_FIRE_COOLDOWN
-## World-space bearing from the keep out through this corner — the middle of
-## the sector this gun is responsible for.
+## World-space bearing from the keep out through this corner — the mount's
+## resting orientation, which its sector drifts back toward.
+var _home_center: float = 0.0
+## Where the sector is pointed right now.
 var _sector_center: float = 0.0
 ## CCW start of the allowed arc.
 var _arc_start: float = 0.0
@@ -68,7 +88,8 @@ func configure(
 	)
 	# Outward from the keep through this corner, with the sector centred on it.
 	var outward := global_position - _keep_center
-	_sector_center = outward.angle() if outward.length_squared() > 0.001 else 0.0
+	_home_center = outward.angle() if outward.length_squared() > 0.001 else 0.0
+	_sector_center = _home_center
 	_arc_start = _sector_center - ARC_SPAN * 0.5
 	# Start facing down the middle of the sector.
 	if barrel:
@@ -95,6 +116,7 @@ func _process(delta: float) -> void:
 
 	fire_cooldown = max(fire_cooldown - delta, 0.0)
 	_lock_timer = max(_lock_timer - delta, 0.0)
+	_slew_sector(delta)
 	var plane := _acquire_target()
 	if plane == null:
 		return
@@ -111,11 +133,46 @@ func _process(delta: float) -> void:
 		# Only fire when barrel is on the plane and the shot won't hit the keep.
 		if not _shot_hits_keep(plane.global_position):
 			var aim_world := _barrel_world_angle()
-			# Compare against the clamped aim (barrel can't enter the keep wedge).
+			# Compare against the clamped aim — the barrel cannot leave the
+			# mount's sector, however far outside it the bird actually is.
 			var clamped := _arc_to_world(_world_to_arc(desired_world))
 			if abs(angle_difference(aim_world, clamped)) < 0.4:
 				_fire(clamped + randf_range(-AIM_JITTER, AIM_JITTER))
 				fire_cooldown = _cooldown
+
+
+## Traverse the whole sector toward whatever is pressing this mount, and let it
+## settle back to its corner when nothing is.
+func _slew_sector(delta: float) -> void:
+	var contact := _contact_bearing()
+	var goal := _home_center
+	var rate := SECTOR_RECENTRE_SPEED
+	if not is_inf(contact):
+		# Clamp the goal to the arc this mount may be pulled across, so leaning
+		# on one side shifts the fort's attention without unpinning it.
+		goal = _home_center + clampf(
+			angle_difference(_home_center, contact), -SECTOR_HOME_SPAN, SECTOR_HOME_SPAN
+		)
+		rate = SECTOR_SLEW_SPEED
+	var step := rate * delta
+	_sector_center += clampf(angle_difference(_sector_center, goal), -step, step)
+	_arc_start = _sector_center - ARC_SPAN * 0.5
+
+
+## Bearing of the nearest bird in range with sector limits ignored. The crew can
+## see a raid it cannot yet bring the barrel onto — that sighting is what lets
+## the mount traverse to meet it. INF when the sky is clear.
+func _contact_bearing() -> float:
+	var best := INF
+	var best_d := _range
+	for child in _main.get_planes():
+		if child is PlaneUnit and child.phase == PlaneUnit.Phase.FLYING:
+			var to: Vector2 = child.global_position - global_position
+			var d: float = to.length()
+			if d < best_d:
+				best_d = d
+				best = to.angle()
+	return best
 
 
 ## Hold the current bird until it dies, leaves, or the lock expires; only then
@@ -287,6 +344,8 @@ func reset() -> void:
 	_dead = false
 	_locked = null
 	_lock_timer = 0.0
+	_sector_center = _home_center
+	_arc_start = _sector_center - ARC_SPAN * 0.5
 	hp = max_hp
 	visible = true
 	set_process(true)

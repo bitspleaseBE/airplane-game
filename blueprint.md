@@ -32,14 +32,14 @@ Two sentences, max. What is this game and why is it fun?
 - **Ammo & reload:** Fixed squadron per level, plus a fixed scramble gap between birds — the rate cap is what makes each placement a choice rather than a race. No regen.
 - **Weak points / headshots:** Keep is the win target; corner turrets are optional but make bombing safer if destroyed.
 - **Between waves:** [ ] upgrade shop · [x] auto-continue · [ ] repair/ability choices
-- **The hook — what makes it OUR game (one sentence):** The fortress shows you exactly where it is looking, and you spend a limited squadron threading the gaps — every bird you lose is a read you got wrong, not a dice roll.
+- **The hook — what makes it OUR game (one sentence):** The fortress shows you exactly where it is looking and turns to face wherever you keep hitting, so a limited squadron has to keep dancing around the island to find the next open water.
 
 ## 5. Win / lose
 
 - **Lose when:** Squadron is spent (all planes used or destroyed) and the keep still stands.
 - **Run structure:** [ ] endless + score · [ ] survive N waves = win · [x] level-based campaign
 - **Target run length:** Full game 2–5 minutes, rather too short than too long; ~30–90 seconds per level.
-- **Difficulty curve:** Harder every level, exactly one new thing per level; dumping the whole squadron at once wins early levels but must fail later ones (gates in `.cursor/skills/design-gates/`).
+- **Difficulty curve:** Harder every level, exactly one new thing per level. The load-bearing rule: **a siege flown down a single bearing must not win.** Pick one quiet lane, point the whole squadron at it and fly straight in, and the fortress traverses to meet you and shuts it — you have to keep moving the attack around the island. Early bastions and each wing's first bastion forgive this while the player learns; the milestone strongholds do not. Every bastion must still be winnable by *some* approach — the rule forces variation, it never makes a level unbeatable (gates in `.cursor/skills/design-gates/`).
 
 ## 6. Player persona
 

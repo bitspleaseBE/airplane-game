@@ -9,27 +9,48 @@ Four boundaries keep the game playable. Check them whenever levels, balance
 values, or player-facing text change. Gates 1 and 3 are machine-tested; gates
 2 and 4 are review checklists.
 
-## Gate 1 — Placement must pay (auto-tested)
+## Gate 1 — The attack must keep changing direction (auto-tested)
 
-Deploys are rate-limited, so tapping faster is not a strategy — **where** each
-bird enters is. The gate is therefore not "does blitz lose" but "does reading
-the board beat not reading it".
+The rule is about **direction, not about which strategy loses which level**.
 
-`flank` deploys into the quiet corridors (it scores every approach against the
-living guns' sectors and current aim); `blitz`, `spread` and `waves` all place
-birds without reading anything. Compare `planes_deployed` on wins:
+A siege flown down one bearing — pick the quiet lane, point the whole squadron
+at it, fly straight in — must not win. The player has to keep moving their
+attack around the island. The flip side matters just as much: **every bastion
+must stay winnable**. This gate exists to force variation, not to make levels
+unbeatable, so a level no strategy can clear is a failure of the gate, not a
+pass.
 
-| Level | flank vs. random placement | both |
-|-------|----------------------------|------|
-| 1–2   | may be even — the opening bastions are meant to forgive | must win |
-| 5+    | flank should win using **meaningfully fewer planes** | flank must win |
-| 16–20 | flank's edge should be largest; random play should be marginal | — |
+Two harness strategies measure it:
 
-If `flank` and the random strategies converge, placement has stopped being a
-decision — the usual causes are guns that can traverse to cover every approach
-(check `Turret.ARC_SPAN`), an AA envelope that no longer reaches the water
-(check `turret_range_for_level` against `island_radius_for_level`), or a deploy
-rate high enough that saturation beats geometry.
+- `column` — finds the quietest bearing once, then commits the entire squadron
+  to it. The strongest straight-line attack available.
+- `flank` — re-reads the board before every deploy and moves to whatever is
+  quiet *now*. The varying-direction play.
+
+| Bastion | column | flank |
+|---------|--------|-------|
+| 1–2, and each wing's first bastion (6, 11, 16) | may win — these are meant to forgive while the player learns | must win |
+| every other bastion | must fail often, and must never be reliably cheaper than `flank` | must win |
+| milestone strongholds (10, 15, 20) | must fail | must win |
+
+Deploys are rate-limited, so tapping *faster* is not a strategy either — that
+is why the old "blitz must lose" row is gone. Blitz is just random placement at
+the rate cap; it is a useful control, not the thing under test.
+
+### If `column` starts winning again
+
+The mechanism that punishes a fixed bearing is **sector slew** in
+`scripts/turret.gd`: each corner mount traverses its whole firing sector toward
+sustained pressure and drifts back to its corner when the sky clears, so a lane
+you lean on closes behind you. Check, in order:
+
+1. `SECTOR_SLEW_SPEED` — too slow and the lane never shuts.
+2. `SECTOR_HOME_SPAN` — must be wide enough that the two mounts flanking an
+   empty corner can between them cover the 90° hole it leaves. Too narrow and
+   every three-gun bastion keeps a permanent hole that no pressure can close.
+3. Whether the level is simply loose. If a level can be won on a third of its
+   squadron, losses never bite and no placement decision can show up in the
+   result — tighten the squadron or thicken the ring before touching the slew.
 
 Run the gate:
 

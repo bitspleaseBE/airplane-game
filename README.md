@@ -16,6 +16,8 @@ Or open this folder in the Godot 4.7 editor and press Play.
 
 Read the water before you tap. Every corner gun owns a sector, drawn on the sea as a warm wedge; the cool gaps between sectors are the safe lanes in. A wedge that brightens is a gun that has locked onto one of your birds and is about to fire — and a gun stays committed for over a second, so a bird sent into a hot sector buys the next one a clean run. Silence a gun and its sector goes dark for good.
 
+**Keep moving.** Sectors are not fixed. Lean on one lane and the mounts traverse to meet you — you will watch the wedges swing across your approach and shut it. Find the next quiet water, hit from there, and let the fort chase. A squadron flown down a single bearing gets ground down; on the milestone strongholds it simply fails.
+
 Destroy the central keep to win; spend the squadron with the keep still standing and you lose. Beat a bastion to pan to the next of 20 islands.
 
 **Airframes are earned per level band:** gunships (1–5) hunt corner AA then strafe with their nose gun, bombers (6–10) drop one heavy bomb, strike jets (11–15) fire a guided missile from standoff and bank away, carpet bombers (16–20) lay three bombs along the keep track. The stronghold evolves too — missile batteries from level 4, flak airbursts from 13.
@@ -29,7 +31,7 @@ tools/playtest.sh --planes=15 --duration=60   # full run to a win/lose ending
 
 Simulates taps, saves screenshots and a `summary.json` to `playtest/latest/`, and prints a `PLAYTEST_SUMMARY` JSON line. Agents follow the write code → playtest → improve loop in `.cursor/skills/playtest-loop/`.
 
-Strategies are `spread` / `blitz` / `waves` (all place birds without reading the board) and `flank`, which scores every approach corridor against the living guns' sectors and current aim and deploys into the quiet ones. `flank` is the stand-in for a player who reads the threat wedges, so **`flank` beating the random strategies is the measurement that placement is a real decision** — if they converge, the tactics layer has stopped working.
+Strategies are `spread` / `blitz` / `waves` (random placement), `flank` (re-reads the board before every deploy and moves to whatever water is quiet now), and `column` (locks the quietest bearing once and commits the whole squadron to it). The pair that matters is **`flank` must win where `column` fails** — that is the measurement that the siege still demands changing direction. See `.cursor/skills/design-gates/`.
 
 ## Project layout
 
@@ -95,10 +97,11 @@ Orientation is locked to portrait in the preset.
 
 - Levels: 20 procedural islands in one ocean; camera pans between them
 - Deploy rate: one bird per scramble gap (0.5–1.0 s by wing) for taps *and* holds — the only resource clock in the game
-- Squadron: sized per wing, from measured good-play runs — gunship 36→48, bomber 34→42, strike 34→42, carpet 46→62
+- Squadron: sized per wing, from measured good-play runs — gunship 36→48, bomber 30→42, strike 42→54, carpet 50→62
 - Wings by level band: gunship 1–5 (SEAD — prefer corner AA, 5 strafe shots × 4 dmg), bomber 6–10 (one 20-dmg bomb), strike 11–15 (guided missile, 20 dmg, launched 160 px out), carpet 16–20 (3 bombs × 10 dmg along the keep track)
 - Keep HP: 100 + 4×(level−1); corner AA and outer towers scale up
-- Corner AA: each gun covers a ~120° sector centred outward from its corner and cannot traverse past it. Four live guns close the ring, three leave a usable gap, two leave the island open. Reach scales with the island (capped at 470) so the contested water stays a real space on the big late strongholds
+- Corner AA: each gun covers a ~120° sector centred on its current facing and cannot traverse past it. Four live guns close the ring, three leave a usable gap, two leave the island open. Reach scales with the island (capped at 470) so the contested water stays a real space on the big late strongholds
+- Sectors slew: a mount swings its whole sector toward sustained pressure (up to ~57° off its corner) and drifts back when the sky clears. This is what forces the attack to keep moving — a fixed bearing gets answered and shut
 - Corner AA leads its target, commits to it for 1.25 s, and traverses at 1.5 rad/s — slower than a bird's run in, which is what makes baiting work
 - Outer towers traverse freely but reach short: the close-in punish for overflying, not the strategic ring
 - Stronghold arsenal: machine guns from level 1, missile launchers from 4, flak airbursts from 13 (downs every plane within 60 px of the burst)

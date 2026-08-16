@@ -11,7 +11,7 @@ extends Node
 ##   --planes=N|all        bombers to deploy (default 6; "all" = full squadron)
 ##   --duration=S          max run seconds before ending (default 25)
 ##   --shot-interval=S     seconds between periodic screenshots (default 3)
-##   --strategy=NAME       spread (default) | blitz | waves | flank — see _deploy_delay
+##   --strategy=NAME       spread (default) | blitz | waves | flank | column — see _deploy_delay
 ##   --seed=N              fixed RNG seed for reproducible runs
 ##   --level=N             forwarded to the game via main.set_level(N) if it exists
 ##   --briefing            force the first-play mission briefing on screen
@@ -295,9 +295,14 @@ func _deploy_bomber(i: int) -> bool:
 	var water_min := GameConfig.WATER_MIN_RADIUS
 	if _main.has_method("active_water_min_radius"):
 		water_min = _main.active_water_min_radius()
-	# Mix near-shore lagoon taps with deep open-water taps (both must work).
-	var radius := water_min + randf_range(20.0, 420.0)
-	var world := center + Vector2.from_angle(_deploy_angle(i)) * radius
+	# Mix near-shore lagoon taps with deep open-water taps (both must work), but
+	# never past the edge of the screen: a human cannot tap water they cannot
+	# see, so measuring placements out there would flatter every strategy with
+	# deploys nobody can actually make. On the big late islands this was most of
+	# the deep band, and it showed up as spawns_via_fallback in the summary.
+	var theta := _deploy_angle(i)
+	var radius := minf(water_min + randf_range(20.0, 420.0), _max_visible_radius(theta))
+	var world := center + Vector2.from_angle(theta) * radius
 
 	# Property may be missing if main.gd currently fails to parse; stay quiet.
 	var before: int = _main.planes_remaining if "planes_remaining" in _main else -1
@@ -321,6 +326,24 @@ func _deploy_bomber(i: int) -> bool:
 	return before < 0  # Unknown state: don't retry forever, assume it worked.
 
 
+## Furthest a deploy can sit from the bastion along `theta` and still be on
+## screen. Assumes the camera is centred on the active bastion, which it is
+## outside of level transitions.
+func _max_visible_radius(theta: float) -> float:
+	var view: Vector2 = get_viewport().get_visible_rect().size * 0.5
+	var cam: Camera2D = _main.camera if "camera" in _main else null
+	if cam:
+		view /= cam.zoom
+	view -= Vector2(56.0, 56.0)  # keep clear of the HUD edges
+	var dir := Vector2.from_angle(theta)
+	var limit := INF
+	if absf(dir.x) > 0.001:
+		limit = minf(limit, absf(view.x / dir.x))
+	if absf(dir.y) > 0.001:
+		limit = minf(limit, absf(view.y / dir.y))
+	return limit
+
+
 func _deploy_angle(i: int) -> float:
 	match _strategy:
 		"blitz":
@@ -332,6 +355,15 @@ func _deploy_angle(i: int) -> float:
 			# is meant to let a human play — if it does not beat the random
 			# strategies, placement is not yet a real decision.
 			return _coldest_angle()
+		"column":
+			# The strongest one-direction attack available: find the quietest
+			# bearing once, then commit the whole squadron to it. The campaign is
+			# supposed to answer sustained pressure from a fixed heading, so from
+			# the third bastion on this must fail — see the design-gates skill.
+			if !_column_locked:
+				_column_locked = true
+				_column_angle = _coldest_angle()
+			return _column_angle + randf_range(-0.05, 0.05)
 		"waves":
 			# Each squad of WAVE_SIZE attacks from the next side (N/E/S/W).
 			var wave := i / WAVE_SIZE
@@ -348,6 +380,10 @@ func _deploy_angle(i: int) -> float:
 ## down one lane, which lets a single gun hold the lock and eat all of it.
 const FLANK_SAMPLES := 24
 const FLANK_COLD_BAND := 7
+
+## "column" locks one bearing for the whole siege.
+var _column_locked := false
+var _column_angle := 0.0
 
 
 func _coldest_angle() -> float:
@@ -394,7 +430,7 @@ func _deploy_delay(i: int) -> float:
 	# Stay just above the level's deploy gap so taps aren't eaten by cooldown.
 	var scramble: float = GameConfig.deploy_interval_for_level(_level) + 0.05
 	match _strategy:
-		"blitz", "flank":
+		"blitz", "flank", "column":
 			return scramble
 		"waves":
 			return 4.0 if i % WAVE_SIZE == 0 else scramble

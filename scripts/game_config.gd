@@ -84,9 +84,9 @@ const FLAK_BURST_RADIUS := 60.0
 ## Vector2i(size at the wing's first level, growth per level within the band).
 const SQUADRON_BY_WING := {
 	PlaneType.GUNSHIP: Vector2i(36, 3),  # levels 1–5   → 36..48
-	PlaneType.BOMBER: Vector2i(34, 2),   # levels 6–10  → 34..42
-	PlaneType.STRIKE: Vector2i(34, 2),   # levels 11–15 → 34..42
-	PlaneType.CARPET: Vector2i(46, 4),   # levels 16–20 → 46..62
+	PlaneType.BOMBER: Vector2i(30, 3),   # levels 6–10  → 30..42
+	PlaneType.STRIKE: Vector2i(42, 3),   # levels 11–15 → 42..54
+	PlaneType.CARPET: Vector2i(50, 3),   # levels 16–20 → 50..62
 }
 const SQUADRON_BASE := 36
 ## Alias for level-1 squadron (playtest / HUD defaults).
@@ -299,6 +299,11 @@ func tower_count_range_for_level(level: int) -> Vector2i:
 		return Vector2i(1, 1)
 	if n <= 5:
 		return Vector2i(2, 2)
+	# The bomber bastions used to thin out here: three corner guns and a couple
+	# of towers on a mid-sized island left so much slack that nothing the player
+	# did with placement showed up in the result.
+	if n <= 9:
+		return Vector2i(3, 4)
 	if n >= 16:
 		return Vector2i(4, 6)
 	if n >= FLAK_TOWER_UNLOCK_LEVEL:

@@ -16,12 +16,13 @@ const _UNLOCK_TOASTS := {
 }
 
 ## Every hint names the read as well as the wing: the orange wedges are where
-## the fort's guns are pointed, and the cool water between them is the way in.
+## the fort's guns are pointed, the cool water between them is the way in, and
+## the wedges swing to meet you — so no lane stays open for long.
 const _WING_HINTS := {
-	GameConfig.PlaneType.GUNSHIP: "Deploy in the cool water, commander —\nsoft the guns, then the keep",
-	GameConfig.PlaneType.BOMBER: "Slip the bombers past the orange —\nthat's where they're aiming",
-	GameConfig.PlaneType.STRIKE: "Loose the strike jets down a quiet lane —\nlet the missiles do the walking",
-	GameConfig.PlaneType.CARPET: "One pass, three gifts —\npick a gap wide enough to fly out of",
+	GameConfig.PlaneType.GUNSHIP: "Hit the cool water, commander —\nthen move before they swing around",
+	GameConfig.PlaneType.BOMBER: "Slip the bombers past the orange —\nand never twice from the same side",
+	GameConfig.PlaneType.STRIKE: "Loose the jets down a quiet lane —\nwhen it heats up, find another",
+	GameConfig.PlaneType.CARPET: "One pass, three gifts —\nkeep them guessing which side",
 }
 
 ## First bastion of each new wing.
@@ -49,7 +50,7 @@ const _WING_SETTINGS_KEYS := {
 	GameConfig.PlaneType.CARPET: "carpet",
 }
 
-const _FIRST_BRIEFING_TEXT := "TAP THE OPEN WATER TO SCRAMBLE\nTHE ORANGE IS WHERE THEIR GUNS LOOK"
+const _FIRST_BRIEFING_TEXT := "TAP OPEN WATER TO SCRAMBLE\nORANGE IS WHERE THEIR GUNS LOOK\nTHEY TURN — SO KEEP SWITCHING SIDES"
 
 enum BriefingKind { NONE, FIRST, WING }
 
