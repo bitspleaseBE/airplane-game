@@ -24,6 +24,9 @@ var _main: Node2D
 var _dead: bool = false
 var _range: float = GameConfig.TOWER_MG_RANGE
 var _cooldown: float = GameConfig.TOWER_MG_COOLDOWN
+## Same commitment as corner AA — see Turret._acquire_target.
+var _locked: PlaneUnit = null
+var _lock_timer: float = 0.0
 
 @onready var barrel: Sprite2D = $Barrel
 @onready var base: Sprite2D = $Base
@@ -94,18 +97,38 @@ func _process(delta: float) -> void:
 		return
 
 	fire_cooldown = max(fire_cooldown - delta, 0.0)
-	var plane := _nearest_plane()
+	_lock_timer = max(_lock_timer - delta, 0.0)
+	var plane := _acquire_target()
 	if plane == null:
 		return
 
 	var to_plane: Vector2 = plane.global_position - global_position
 	var desired := to_plane.angle() + PI * 0.5
-	barrel.rotation = lerp_angle(barrel.rotation, desired, GameConfig.TURRET_ROTATE_SPEED * delta)
+	# Step at a fixed rate rather than lerping, so traverse time is a number the
+	# player can learn instead of an ease that is fast when the swing is wide.
+	var step := GameConfig.TURRET_TRAVERSE_SPEED * delta
+	barrel.rotation += clampf(angle_difference(barrel.rotation, desired), -step, step)
 
 	if to_plane.length() <= _range and fire_cooldown <= 0.0:
 		if abs(angle_difference(barrel.rotation, desired)) < 0.45:
 			_fire(to_plane.angle(), plane)
 			fire_cooldown = _cooldown
+
+
+func _acquire_target() -> PlaneUnit:
+	if _lock_timer > 0.0 and _is_engageable(_locked):
+		return _locked
+	_locked = _nearest_plane()
+	_lock_timer = GameConfig.TURRET_TARGET_LOCK_TIME if _locked != null else 0.0
+	return _locked
+
+
+func _is_engageable(plane: PlaneUnit) -> bool:
+	if plane == null or not is_instance_valid(plane) or plane.is_queued_for_deletion():
+		return false
+	if plane.phase != PlaneUnit.Phase.FLYING:
+		return false
+	return global_position.distance_to(plane.global_position) <= _range
 
 
 func _nearest_plane() -> PlaneUnit:
@@ -144,6 +167,35 @@ func _fire(aim_angle: float, target: PlaneUnit) -> void:
 			var burst := global_position + (predicted - global_position).limit_length(GameConfig.FLAK_RANGE)
 			_main.register_bullet(shell)
 			shell.setup(muzzle, burst, _main)
+
+
+## --- Threat readout (see scripts/threat_overlay.gd) ---
+
+func threat_aim() -> float:
+	# Barrel art points +Y, so world aim is the sprite angle less a quarter turn.
+	return barrel.rotation - PI * 0.5 if barrel else 0.0
+
+
+func threat_range() -> float:
+	return _range
+
+
+func threat_color() -> Color:
+	return PAD_COLORS.get(weapon, Color.WHITE)
+
+
+func threat_locked() -> bool:
+	return _is_engageable(_locked)
+
+
+## Outer towers traverse freely — short reach, no sector to draw. They are the
+## close-in punish for flying over the fort, not the strategic ring.
+func threat_sector_center() -> float:
+	return 0.0
+
+
+func threat_sector_span() -> float:
+	return 0.0
 
 
 func take_damage(amount: int) -> void:

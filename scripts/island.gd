@@ -333,6 +333,19 @@ func apply_gunfire_at(pos: Vector2, damage: int) -> void:
 			keep.take_damage(damage)
 
 
+## Every gun still shooting, for the threat readout. Corner AA first so its
+## wedges draw under the outer towers' rather than over them.
+func living_guns() -> Array[Node2D]:
+	var out: Array[Node2D] = []
+	for turret in turrets_root.get_children():
+		if turret is Turret and not turret.is_destroyed():
+			out.append(turret)
+	for tower in towers_root.get_children():
+		if tower is Tower and not tower.is_destroyed():
+			out.append(tower)
+	return out
+
+
 ## Living corner AA first (near the keep), then outer towers — gunship doctrine.
 func get_defense_positions() -> Array[Vector2]:
 	var out: Array[Vector2] = []

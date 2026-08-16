@@ -8,7 +8,7 @@ cd "$(dirname "$0")/.."
 
 LEVEL="${LEVEL:-1}"
 SEED="${SEED:-7}"
-STRATEGIES=(blitz spread waves)
+STRATEGIES=(flank blitz spread waves)
 
 mkdir -p playtest
 touch playtest/.gdignore

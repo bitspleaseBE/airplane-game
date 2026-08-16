@@ -27,12 +27,12 @@ Two sentences, max. What is this game and why is it fun?
 
 ## 4. Core loop
 
-- **The 30-second loop:** Tap water around the island to spawn a bomber; it flies toward the keep, drops a bomb if it survives, then exits. Turrets track and shoot planes that get close.
-- **Aiming:** Tap spawn point on water; plane auto-flies toward the keep (and bombs whatever is under the drop).
-- **Ammo & reload:** Fixed squadron per level (15 bombers). No regen.
+- **The 30-second loop:** Read which water the fortress's guns are covering, tap a quiet lane to scramble a bird; it flies toward the keep, delivers if it survives, then exits. Guns commit to one target at a time and can only cover their own sector, so each deploy both spends a bird and pulls attention somewhere.
+- **Aiming:** Tap spawn point on water; plane auto-flies toward the keep (and bombs whatever is under the drop). The decision is the entry corridor, not the flight.
+- **Ammo & reload:** Fixed squadron per level, plus a fixed scramble gap between birds — the rate cap is what makes each placement a choice rather than a race. No regen.
 - **Weak points / headshots:** Keep is the win target; corner turrets are optional but make bombing safer if destroyed.
 - **Between waves:** [ ] upgrade shop · [x] auto-continue · [ ] repair/ability choices
-- **The hook — what makes it OUR game (one sentence):** Drop planes around a living fortress and watch the swarm race the turrets to the keep.
+- **The hook — what makes it OUR game (one sentence):** The fortress shows you exactly where it is looking, and you spend a limited squadron threading the gaps — every bird you lose is a read you got wrong, not a dice roll.
 
 ## 5. Win / lose
 

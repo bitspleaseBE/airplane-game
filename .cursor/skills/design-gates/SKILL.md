@@ -9,28 +9,38 @@ Four boundaries keep the game playable. Check them whenever levels, balance
 values, or player-facing text change. Gates 1 and 3 are machine-tested; gates
 2 and 4 are review checklists.
 
-## Gate 1 — Strategy curve (auto-tested)
+## Gate 1 — Placement must pay (auto-tested)
 
-Dumping the whole squadron at once (`blitz`) must be a winning strategy on
-early levels, and must stop working on later levels where smarter tactics
-(`waves`, `spread`, and future turret-first plays) still win.
+Deploys are rate-limited, so tapping faster is not a strategy — **where** each
+bird enters is. The gate is therefore not "does blitz lose" but "does reading
+the board beat not reading it".
 
-| Level | blitz | best tactical strategy |
-|-------|-------------|------------------------|
-| 1–2   | must WIN    | must win               |
-| 3+    | must LOSE   | must win               |
+`flank` deploys into the quiet corridors (it scores every approach against the
+living guns' sectors and current aim); `blitz`, `spread` and `waves` all place
+birds without reading anything. Compare `planes_deployed` on wins:
+
+| Level | flank vs. random placement | both |
+|-------|----------------------------|------|
+| 1–2   | may be even — the opening bastions are meant to forgive | must win |
+| 5+    | flank should win using **meaningfully fewer planes** | flank must win |
+| 16–20 | flank's edge should be largest; random play should be marginal | — |
+
+If `flank` and the random strategies converge, placement has stopped being a
+decision — the usual causes are guns that can traverse to cover every approach
+(check `Turret.ARC_SPAN`), an AA envelope that no longer reaches the water
+(check `turret_range_for_level` against `island_radius_for_level`), or a deploy
+rate high enough that saturation beats geometry.
 
 Run the gate:
 
 ```bash
 tools/balance_check.sh              # level 1
-LEVEL=3 tools/balance_check.sh      # once levels exist
+LEVEL=5 tools/balance_check.sh      # any level
 ```
 
-It plays the full squadron with each strategy (fixed seed) and prints one
-summary line per strategy. Compare `result` against the table. If blitz wins
-a level that should demand tactics, raise defense pressure (turret range,
-fire rate, missile count); if no strategy can win, lower it.
+**Per-seed variance is high** — a single run of each strategy proves nothing.
+Use at least 3 seeds per cell before concluding anything. (Island layout is
+seeded from the level number, so `--seed` only varies tap placement.)
 
 ## Gate 2 — One new thing per level (review)
 

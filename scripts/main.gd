@@ -30,6 +30,10 @@ var campaign_guns_destroyed: int = 0
 var _spawn_cooldown: float = 0.0
 var _holding: bool = false
 var _hold_pos: Vector2 = Vector2.ZERO
+## A press that arrived mid-scramble, held until the deck is clear. Dropping it
+## instead would read as the game ignoring taps.
+var _queued_pos: Vector2 = Vector2.ZERO
+var _has_queued: bool = false
 var _islands: Array[Island] = []
 ## Empty tropical islets between bastions — not playable targets.
 var _scenic_islands: Array[Island] = []
@@ -60,6 +64,7 @@ var _ocean_uniform_pos := Vector2(INF, INF)
 
 @onready var camera: Camera2D = $Camera
 @onready var islands_root: Node2D = $Islands
+@onready var threat: ThreatOverlay = $Threat
 @onready var planes: Node2D = $Planes
 @onready var bullets: Node2D = $Bullets
 @onready var effects: Node2D = $Effects
@@ -86,6 +91,7 @@ func _ready() -> void:
 	_apply_clouds_enabled()
 	_sync_map_layers_to_camera()
 	_activate_level(1, false)
+	threat.setup(self)
 	hud.setup(self)
 	_emit_hud()
 	Sfx.start_island_ambient(self)
@@ -106,6 +112,10 @@ func _process(delta: float) -> void:
 		if _drain_island_build_queue():
 			_build_drain_cd = 0.05
 	_spawn_cooldown = max(_spawn_cooldown - delta, 0.0)
+	if state == State.PLAYING and _has_queued and _spawn_cooldown <= 0.0:
+		var queued := _queued_pos
+		_has_queued = false
+		_try_spawn(queued, false)
 	# Safety net: if the counter is empty and nothing's airborne, settle the siege.
 	if state == State.PLAYING and planes_remaining <= 0 and active_planes <= 0:
 		_check_squadron_spent()
@@ -217,8 +227,40 @@ func restart() -> void:
 	advance_or_restart()
 
 
-## from_press: true on click/tap — always deploy once. false while holding —
-## wait for the plane's scramble interval between birds.
+## Water only, and clear of every other island's sand.
+func _is_deployable(world_pos: Vector2) -> bool:
+	if _active_island == null:
+		return false
+	var center := active_center
+	var theta := (world_pos - center).angle()
+	# Land only — shallow lagoon and deep open water are both fair game.
+	if world_pos.distance_to(center) < _active_island.get_shore_radius(theta) + 12.0:
+		return false
+	# Don't seed a bird on top of another bastion's island — or a scenic islet.
+	for island in _islands:
+		if island == null or island == _active_island:
+			continue
+		var other_c: Vector2 = island.get_center()
+		var other_shore: float = island.get_shore_radius((world_pos - other_c).angle())
+		if world_pos.distance_to(other_c) < other_shore + 12.0:
+			return false
+	for scenic in _scenic_islands:
+		if scenic == null or not scenic.is_built():
+			continue
+		var sc: Vector2 = scenic.get_center()
+		var ss: float = scenic.get_shore_radius((world_pos - sc).angle())
+		if world_pos.distance_to(sc) < ss + 12.0:
+			return false
+	return true
+
+
+## from_press: true on click/tap — parks the request if the deck is still busy.
+## false while holding or draining the queue — simply waits its turn.
+##
+## The scramble gap applies to every deploy, taps included. It is the whole
+## economy: birds leave the deck at a fixed rate, so the only thing the player
+## controls is *where* each one enters. Letting taps bypass it made mashing the
+## dominant strategy at every difficulty and left placement meaningless.
 func _try_spawn(world_pos: Vector2, from_press: bool = false) -> void:
 	if state != State.PLAYING or _active_island == null:
 		return
@@ -226,34 +268,15 @@ func _try_spawn(world_pos: Vector2, from_press: bool = false) -> void:
 		return
 	if planes_remaining <= 0:
 		return
-	if not from_press and _spawn_cooldown > 0.0:
+	if _spawn_cooldown > 0.0:
+		if from_press and _is_deployable(world_pos):
+			_queued_pos = world_pos
+			_has_queued = true
+		return
+	if not _is_deployable(world_pos):
 		return
 
 	var center := active_center
-	var dist := world_pos.distance_to(center)
-	var theta := (world_pos - center).angle()
-	var shore: float = _active_island.get_shore_radius(theta)
-	# Land only — shallow lagoon and deep open water are both fair game.
-	if dist < shore + 12.0:
-		return
-	# Don't seed a bird on top of another bastion's island — or a scenic islet.
-	for island in _islands:
-		if island == null or island == _active_island:
-			continue
-		var other_c: Vector2 = island.get_center()
-		var other_d := world_pos.distance_to(other_c)
-		var other_shore: float = island.get_shore_radius((world_pos - other_c).angle())
-		if other_d < other_shore + 12.0:
-			return
-	for scenic in _scenic_islands:
-		if scenic == null or not scenic.is_built():
-			continue
-		var sc: Vector2 = scenic.get_center()
-		var sd := world_pos.distance_to(sc)
-		var ss: float = scenic.get_shore_radius((world_pos - sc).angle())
-		if sd < ss + 12.0:
-			return
-
 	var plane_type: GameConfig.PlaneType = GameConfig.plane_type_for_level(current_level)
 	_spawn_cooldown = GameConfig.deploy_interval_for_plane(plane_type)
 	planes_remaining -= 1
@@ -837,6 +860,8 @@ func _disconnect_island(island: Island) -> void:
 
 func _clear_combatants() -> void:
 	_holding = false
+	_has_queued = false
+	_spawn_cooldown = 0.0
 	for p in planes.get_children():
 		p.queue_free()
 	for b in bullets.get_children():

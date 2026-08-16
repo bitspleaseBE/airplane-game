@@ -15,11 +15,13 @@ const _UNLOCK_TOASTS := {
 	13: "BASTION UPGRADE: FLAK GUNS\nThe sky just grew teeth.",
 }
 
+## Every hint names the read as well as the wing: the orange wedges are where
+## the fort's guns are pointed, and the cool water between them is the way in.
 const _WING_HINTS := {
-	GameConfig.PlaneType.GUNSHIP: "Tap the water, commander —\nsoft the guns, then the keep",
-	GameConfig.PlaneType.BOMBER: "Tap the water, commander —\nscramble the bombers",
-	GameConfig.PlaneType.STRIKE: "Tap the water, commander —\nloose the strike jets",
-	GameConfig.PlaneType.CARPET: "Tap the water, commander —\none pass, three gifts",
+	GameConfig.PlaneType.GUNSHIP: "Deploy in the cool water, commander —\nsoft the guns, then the keep",
+	GameConfig.PlaneType.BOMBER: "Slip the bombers past the orange —\nthat's where they're aiming",
+	GameConfig.PlaneType.STRIKE: "Loose the strike jets down a quiet lane —\nlet the missiles do the walking",
+	GameConfig.PlaneType.CARPET: "One pass, three gifts —\npick a gap wide enough to fly out of",
 }
 
 ## First bastion of each new wing.
@@ -47,7 +49,7 @@ const _WING_SETTINGS_KEYS := {
 	GameConfig.PlaneType.CARPET: "carpet",
 }
 
-const _FIRST_BRIEFING_TEXT := "TAP THE OPEN WATER\nTO DEPLOY YOUR JETFIGHTERS"
+const _FIRST_BRIEFING_TEXT := "TAP THE OPEN WATER TO SCRAMBLE\nTHE ORANGE IS WHERE THEIR GUNS LOOK"
 
 enum BriefingKind { NONE, FIRST, WING }
 
@@ -64,12 +66,15 @@ var _vig_pulse_tween: Tween
 var _cue_label_tween: Tween
 var _stars_tween: Tween
 var _wing_brief_queued := false
+var _chrome_faded := false
+var _chrome_tween: Tween
 var _playtest := false
 var _force_wing_briefing := false
 
 @onready var squadron_label: Label = $Root/TopBar/SquadronRow/SquadronLabel
 @onready var keep_bar: ProgressBar = $Root/TopBar/KeepBar
 @onready var sound_button: Button = $Root/TopBar/SoundButton
+@onready var title_label: Label = $Root/Title
 @onready var level_label: Label = $Root/LevelLabel
 @onready var wing_label: Label = $Root/TopBar/SquadronRow/WingLabel
 @onready var toast_label: Label = $Root/ToastLabel
@@ -330,6 +335,25 @@ func _dismiss_briefing(save_seen: bool = true) -> void:
 
 func _on_squadron(remaining: int) -> void:
 	squadron_label.text = str(remaining)
+	# The bastion name and the how-to-play hint are orientation, not instruments.
+	# Once the first bird is away the player is oriented, and every pixel they
+	# cover is water they are choosing between — so get them out of the way.
+	if remaining < GameConfig.squadron_for_level(maxi(_last_level, 1)):
+		_set_chrome_faded(true)
+
+
+## Fades the title / bastion number / hint out of the playfield during a siege.
+func _set_chrome_faded(faded: bool) -> void:
+	if _chrome_faded == faded:
+		return
+	_chrome_faded = faded
+	if _chrome_tween and _chrome_tween.is_valid():
+		_chrome_tween.kill()
+	var to := 0.0 if faded else 1.0
+	_chrome_tween = create_tween().set_parallel(true)
+	for node in [title_label, level_label, hint_label]:
+		if node:
+			_chrome_tween.tween_property(node, "modulate:a", to, 0.45)
 
 
 func _on_keep_hp(current: int, maximum: int) -> void:
@@ -339,6 +363,11 @@ func _on_keep_hp(current: int, maximum: int) -> void:
 
 func _on_level(level: int) -> void:
 	level_label.text = "Bastion %d / %d" % [level, GameConfig.LEVEL_COUNT]
+	# Main re-emits this every deploy, so only a genuinely new bastion brings the
+	# orientation chrome back — otherwise it flashes on with every tap.
+	if level != _last_level:
+		hint_label.visible = true
+		_set_chrome_faded(false)
 	var wing_type: GameConfig.PlaneType = GameConfig.plane_type_for_level(level)
 	wing_label.text = GameConfig.plane_name_for_level(level)
 	var tint: Color = GameConfig.PLANE_TYPE_TINTS[wing_type]

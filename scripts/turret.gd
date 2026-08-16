@@ -1,15 +1,32 @@
 class_name Turret
 extends Node2D
 
-## Corner AA turret: tracks nearest plane and fires bullets.
-## Barrel is limited to a 270° arc; the 90° wedge toward the keep is off-limits.
+## Corner AA turret: commits to a bird and fires bullets.
+##
+## Each corner gun owns the sector facing out from its own corner and cannot
+## swing past it. That limit is the spine of the game's tactics: it means the
+## fortress's coverage is genuinely uneven, that the water one gun is not
+## watching is really safer, and that every gun the player silences opens a
+## permanent hole on that side of the island. A freely-rotating gun made all
+## approaches equivalent and reduced deploying to random tapping.
+##
 ## Targeting also skips planes whose shot line would pass through the keep.
 
 signal destroyed(pos: Vector2)
 
 const BARREL_ART_OFFSET := PI * 0.5
-const BLOCKED_HALF_ANGLE := PI * 0.25  # ±45° around keep = 90° forbidden wedge
-const ARC_SPAN := PI * 1.5  # 270° allowed
+## Sector width the barrel may traverse, centred on the outward bearing. Sized
+## against the fort's four corner mounts (90° apart): four live guns close the
+## ring, three leave a usable gap, two leave the island wide open. That is the
+## difficulty curve, drawn in geometry rather than in stat multipliers.
+const ARC_SPAN := PI * 0.67  # ~120°
+## Slack past the sector edge before a plane stops being worth tracking.
+const TRACK_SLACK := 0.12
+## Gunners under-lead a little and scatter a little. Perfect prediction turned
+## the slower airframes into free kills — the sector should be dangerous, not
+## deterministic, or there is no point flying through one under any plan.
+const LEAD_FACTOR := 0.88
+const AIM_JITTER := 0.05
 const PAD_COLOR := Color(0.85, 0.28, 0.28)
 
 var max_hp: int = GameConfig.TURRET_MAX_HP
@@ -20,10 +37,17 @@ var _dead: bool = false
 var _keep_center: Vector2 = GameConfig.ISLAND_CENTER
 var _range: float = GameConfig.TURRET_RANGE
 var _cooldown: float = GameConfig.TURRET_FIRE_COOLDOWN
-## World-space angle from this turret toward the keep (center of forbidden wedge).
-var _blocked_center: float = 0.0
-## CCW start of the allowed arc (one edge of the keep-facing wedge).
+## World-space bearing from the keep out through this corner — the middle of
+## the sector this gun is responsible for.
+var _sector_center: float = 0.0
+## CCW start of the allowed arc.
 var _arc_start: float = 0.0
+## Gun commits to one bird instead of re-picking the nearest every frame.
+## Without the commitment the barrel chases whichever plane is momentarily
+## closest, which looks like noise and cannot be baited — with it, a decoy
+## genuinely buys the next wave a window.
+var _locked: PlaneUnit = null
+var _lock_timer: float = 0.0
 
 @onready var barrel: Sprite2D = $Barrel
 @onready var base: Sprite2D = $Base
@@ -42,10 +66,11 @@ func configure(
 	_keep_center = keep_center if keep_center != Vector2.ZERO else (
 		main_ref.active_center if main_ref and "active_center" in main_ref else GameConfig.ISLAND_CENTER
 	)
-	_blocked_center = (_keep_center - global_position).angle()
-	# Allowed arc runs CCW from (blocked + 45°) across 270° to (blocked - 45°).
-	_arc_start = _blocked_center + BLOCKED_HALF_ANGLE
-	# Face outward (away from keep) — midpoint of the allowed arc.
+	# Outward from the keep through this corner, with the sector centred on it.
+	var outward := global_position - _keep_center
+	_sector_center = outward.angle() if outward.length_squared() > 0.001 else 0.0
+	_arc_start = _sector_center - ARC_SPAN * 0.5
+	# Start facing down the middle of the sector.
 	if barrel:
 		barrel.rotation = _arc_to_world(ARC_SPAN * 0.5) + BARREL_ART_OFFSET
 
@@ -69,12 +94,17 @@ func _process(delta: float) -> void:
 		return
 
 	fire_cooldown = max(fire_cooldown - delta, 0.0)
-	var plane := _nearest_plane()
+	_lock_timer = max(_lock_timer - delta, 0.0)
+	var plane := _acquire_target()
 	if plane == null:
 		return
 
 	var to_plane: Vector2 = plane.global_position - global_position
-	var desired_world := to_plane.angle()
+	# Aim where the bird will be, not where it is. Corner AA is the fortress's
+	# real teeth: inside its sector a committed gun should land the shot, so
+	# that flying through a hot sector is a decision with a cost rather than a
+	# dice roll. The gaps between sectors are where the player earns safety.
+	var desired_world := (_lead_point(plane) - global_position).angle()
 	_rotate_barrel_toward(desired_world, delta)
 
 	if to_plane.length() <= _range and fire_cooldown <= 0.0:
@@ -84,8 +114,31 @@ func _process(delta: float) -> void:
 			# Compare against the clamped aim (barrel can't enter the keep wedge).
 			var clamped := _arc_to_world(_world_to_arc(desired_world))
 			if abs(angle_difference(aim_world, clamped)) < 0.4:
-				_fire(clamped)
+				_fire(clamped + randf_range(-AIM_JITTER, AIM_JITTER))
 				fire_cooldown = _cooldown
+
+
+## Hold the current bird until it dies, leaves, or the lock expires; only then
+## look for a new one. This is what makes the aim wedge worth reading.
+func _acquire_target() -> PlaneUnit:
+	if _lock_timer > 0.0 and _is_engageable(_locked):
+		return _locked
+	_locked = _nearest_plane()
+	_lock_timer = GameConfig.TURRET_TARGET_LOCK_TIME if _locked != null else 0.0
+	return _locked
+
+
+func _is_engageable(plane: PlaneUnit) -> bool:
+	if plane == null or not is_instance_valid(plane) or plane.is_queued_for_deletion():
+		return false
+	if plane.phase != PlaneUnit.Phase.FLYING:
+		return false
+	var to: Vector2 = plane.global_position - global_position
+	if to.length() > _range:
+		return false
+	if _angle_outside_sector(to.angle()):
+		return false
+	return not _shot_hits_keep(plane.global_position)
 
 
 func _nearest_plane() -> PlaneUnit:
@@ -99,7 +152,7 @@ func _nearest_plane() -> PlaneUnit:
 				continue
 			# Skip planes we can't bring the barrel onto (deep in the keep wedge)
 			# or whose shot line would punch through the keep.
-			if _angle_deep_in_wedge(to.angle()):
+			if _angle_outside_sector(to.angle()):
 				continue
 			if _shot_hits_keep(child.global_position):
 				continue
@@ -112,9 +165,16 @@ func _barrel_world_angle() -> float:
 	return barrel.rotation - BARREL_ART_OFFSET
 
 
-## Deep in the wedge (not just near the arc edge) — not worth tracking.
-func _angle_deep_in_wedge(world_angle: float) -> bool:
-	return abs(angle_difference(_blocked_center, world_angle)) < BLOCKED_HALF_ANGLE * 0.55
+## Where the bird will be when a bullet fired now would reach it. One pass is
+## plenty at these speeds and keeps the miss margin readable rather than exact.
+func _lead_point(plane: PlaneUnit) -> Vector2:
+	var flight := global_position.distance_to(plane.global_position) / GameConfig.BULLET_SPEED
+	return plane.global_position + plane.current_velocity() * flight * LEAD_FACTOR
+
+
+## Outside this gun's sector — another corner's problem, not worth tracking.
+func _angle_outside_sector(world_angle: float) -> bool:
+	return abs(angle_difference(_sector_center, world_angle)) > ARC_SPAN * 0.5 + TRACK_SLACK
 
 
 ## True if the segment turret → target intersects the keep disc.
@@ -144,9 +204,9 @@ func _world_to_arc(world_angle: float) -> float:
 	var t := _ccw_delta(_arc_start, world_angle)
 	if t <= ARC_SPAN:
 		return t
-	# Inside the 90° forbidden wedge: snap to the nearer allowed edge.
-	var into_wedge := t - ARC_SPAN
-	if into_wedge < (TAU - t):
+	# Outside the sector: snap to whichever edge is nearer.
+	var past_edge := t - ARC_SPAN
+	if past_edge < (TAU - t):
 		return ARC_SPAN
 	return 0.0
 
@@ -159,7 +219,7 @@ func _rotate_barrel_toward(desired_world: float, delta: float) -> void:
 	# Move in arc-parameter space so we never traverse the keep-facing wedge.
 	var cur_t := _world_to_arc(_barrel_world_angle())
 	var dst_t := _world_to_arc(desired_world)
-	var max_step := GameConfig.TURRET_ROTATE_SPEED * delta
+	var max_step := GameConfig.TURRET_TRAVERSE_SPEED * delta
 	var next_t := cur_t + clampf(dst_t - cur_t, -max_step, max_step)
 	barrel.rotation = _arc_to_world(next_t) + BARREL_ART_OFFSET
 
@@ -170,6 +230,34 @@ func _fire(aim_angle: float) -> void:
 	var muzzle := global_position + Vector2.RIGHT.rotated(aim_angle) * 28.0
 	_main.register_bullet(bullet)
 	bullet.setup(muzzle, aim_angle)
+
+
+## --- Threat readout (see scripts/threat_overlay.gd) ---
+
+func threat_aim() -> float:
+	return _barrel_world_angle()
+
+
+func threat_range() -> float:
+	return _range
+
+
+func threat_color() -> Color:
+	return PAD_COLOR
+
+
+func threat_locked() -> bool:
+	return _is_engageable(_locked)
+
+
+## The whole sector this gun can ever cover — drawn faintly so the gaps between
+## sectors (and the hole a silenced gun leaves) are visible at a glance.
+func threat_sector_center() -> float:
+	return _sector_center
+
+
+func threat_sector_span() -> float:
+	return ARC_SPAN
 
 
 func take_damage(amount: int) -> void:
@@ -197,6 +285,8 @@ func is_destroyed() -> bool:
 
 func reset() -> void:
 	_dead = false
+	_locked = null
+	_lock_timer = 0.0
 	hp = max_hp
 	visible = true
 	set_process(true)

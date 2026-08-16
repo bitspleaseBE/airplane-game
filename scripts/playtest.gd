@@ -11,7 +11,7 @@ extends Node
 ##   --planes=N|all        bombers to deploy (default 6; "all" = full squadron)
 ##   --duration=S          max run seconds before ending (default 25)
 ##   --shot-interval=S     seconds between periodic screenshots (default 3)
-##   --strategy=NAME       spread (default) | blitz | waves — see _deploy_delay
+##   --strategy=NAME       spread (default) | blitz | waves | flank — see _deploy_delay
 ##   --seed=N              fixed RNG seed for reproducible runs
 ##   --level=N             forwarded to the game via main.set_level(N) if it exists
 ##   --briefing            force the first-play mission briefing on screen
@@ -302,11 +302,14 @@ func _deploy_bomber(i: int) -> bool:
 	# Property may be missing if main.gd currently fails to parse; stay quiet.
 	var before: int = _main.planes_remaining if "planes_remaining" in _main else -1
 	_tap(world)
-	await get_tree().process_frame
-	await get_tree().process_frame
-	if before >= 0 and _main.planes_remaining < before:
-		_input_taps += 1
-		return true
+	# Deploys are rate-limited, and a tap during the scramble gap is parked
+	# rather than dropped — so wait out a full gap before calling it a miss.
+	var wait_frames := int(ceil((GameConfig.deploy_interval_for_level(_level) + 0.2) * 60.0))
+	for _f in wait_frames:
+		await get_tree().process_frame
+		if before >= 0 and _main.planes_remaining < before:
+			_input_taps += 1
+			return true
 	if _main.has_method("_try_spawn"):
 		# Input transform mismatch fallback: spawn through the game API instead.
 		# from_press=true — discrete taps always deploy, same as a real click.
@@ -323,6 +326,12 @@ func _deploy_angle(i: int) -> float:
 		"blitz":
 			# Panic-dump: mash taps anywhere around the island.
 			return randf() * TAU
+		"flank":
+			# Skilled placement proxy: send the bird in where the bastion's guns
+			# are not currently looking. This is the strategy the threat readout
+			# is meant to let a human play — if it does not beat the random
+			# strategies, placement is not yet a real decision.
+			return _coldest_angle()
 		"waves":
 			# Each squad of WAVE_SIZE attacks from the next side (N/E/S/W).
 			var wave := i / WAVE_SIZE
@@ -332,11 +341,60 @@ func _deploy_angle(i: int) -> float:
 			return TAU * float(i) / float(maxi(_planes_to_spawn, 1)) + randf_range(-0.15, 0.15)
 
 
+## Score every approach corridor by how much living gun attention covers the
+## run in, then pick at random from the quietest few. Mirrors what a player
+## reads off the threat wedges — and picking from a band rather than the single
+## argmin matters: always taking the one best bearing funnels the whole squadron
+## down one lane, which lets a single gun hold the lock and eat all of it.
+const FLANK_SAMPLES := 24
+const FLANK_COLD_BAND := 7
+
+
+func _coldest_angle() -> float:
+	var island: Object = _main.get_active_island() if _main.has_method("get_active_island") else null
+	if island == null or not island.has_method("living_guns"):
+		return randf() * TAU
+	var guns: Array = island.living_guns()
+	if guns.is_empty():
+		return randf() * TAU
+	var center: Vector2 = island.get_center()
+	var spawn_r: float = _main.active_water_min_radius() + 90.0
+
+	var scored: Array = []
+	for i in FLANK_SAMPLES:
+		var theta := TAU * float(i) / float(FLANK_SAMPLES)
+		var spawn := center + Vector2.from_angle(theta) * spawn_r
+		var score := 0.0
+		# Integrate threat along the whole corridor, not just at the deploy
+		# point — and past the keep as well as up to it, because the heavier
+		# wings have to fly out the far side before their payload is spent.
+		for step in 6:
+			var probe: Vector2 = spawn.lerp(center, float(step) / 5.0 * 1.3)
+			for gun in guns:
+				var to_probe: Vector2 = probe - gun.global_position
+				var d: float = to_probe.length()
+				var reach: float = gun.threat_range()
+				if d > reach:
+					continue
+				var bearing: float = to_probe.angle()
+				# A gun that cannot traverse this far is no threat here at all —
+				# the sector gaps are the main thing worth reading.
+				var span: float = gun.threat_sector_span()
+				if span > 0.0 and absf(angle_difference(gun.threat_sector_center(), bearing)) > span * 0.5:
+					continue
+				var facing: float = cos(angle_difference(gun.threat_aim(), bearing))
+				score += (0.35 + maxf(facing, 0.0)) * (1.0 - d / reach)
+		scored.append([score, theta])
+	scored.sort_custom(func(a, b): return a[0] < b[0])
+	var pick: Array = scored[randi() % mini(FLANK_COLD_BAND, scored.size())]
+	return float(pick[1]) + randf_range(-0.12, 0.12)
+
+
 func _deploy_delay(i: int) -> float:
 	# Stay just above the level's deploy gap so taps aren't eaten by cooldown.
 	var scramble: float = GameConfig.deploy_interval_for_level(_level) + 0.05
 	match _strategy:
-		"blitz":
+		"blitz", "flank":
 			return scramble
 		"waves":
 			return 4.0 if i % WAVE_SIZE == 0 else scramble
