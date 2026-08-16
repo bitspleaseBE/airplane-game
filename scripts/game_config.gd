@@ -87,9 +87,9 @@ const FLAK_BURST_RADIUS := 60.0
 ## Vector2i(size at the wing's first level, growth per level within the band).
 const SQUADRON_BY_WING := {
 	PlaneType.GUNSHIP: Vector2i(36, 3),  # levels 1–5   → 36..48
-	PlaneType.BOMBER: Vector2i(30, 3),   # levels 6–10  → 30..42
+	PlaneType.BOMBER: Vector2i(38, 4),   # levels 6–10  → 38..54
 	PlaneType.STRIKE: Vector2i(42, 3),   # levels 11–15 → 42..54
-	PlaneType.CARPET: Vector2i(50, 3),   # levels 16–20 → 50..62
+	PlaneType.CARPET: Vector2i(56, 5),   # levels 16–20 → 56..76
 }
 const SQUADRON_BASE := 36
 ## Alias for level-1 squadron (playtest / HUD defaults).

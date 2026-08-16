@@ -98,7 +98,7 @@ Orientation is locked to portrait in the preset.
 - Levels: 20 procedural islands in one ocean; camera pans between them
 - Framing: the camera zooms out per bastion (0.8 down to ~0.6) so the island plus a ~120 px ring of tappable water always fits across the screen. Not cosmetic — at a fixed zoom the level 15 and 20 islands were wider than the viewport, leaving no water to tap east or west and removing those approach bearings from the game entirely
 - Deploy rate: one bird per scramble gap (0.5–1.0 s by wing) for taps *and* holds — the only resource clock in the game
-- Squadron: sized per wing, from measured good-play runs — gunship 36→48, bomber 30→42, strike 42→54, carpet 50→62
+- Squadron: sized per wing, from measured good-play runs — gunship 36→48, bomber 38→54, strike 42→54, carpet 56→76
 - Wings by level band: gunship 1–5 (SEAD — prefer corner AA, 5 strafe shots × 4 dmg), bomber 6–10 (one 20-dmg bomb), strike 11–15 (guided missile, 20 dmg, launched 230 px out — scales with AA reach), carpet 16–20 (3 bombs × 10 dmg along the keep track)
 - Keep HP: 100 + 4×(level−1); corner AA and outer towers scale up
 - Corner AA: each gun covers a ~120° sector centred on its current facing and cannot traverse past it. Four live guns close the ring, three leave a usable gap, two leave the island open. Reach scales with the island (capped at 470) so the contested water stays a real space on the big late strongholds
