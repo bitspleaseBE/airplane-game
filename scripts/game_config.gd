@@ -120,11 +120,21 @@ const PLANE_SCALE := 1.05
 ## Flight contrail cadence (seconds between puffs while airborne).
 const PLANE_TRAIL_INTERVAL := 0.07
 
-## Gap between birds leaving the deck — lighter wings scramble faster. This
-## applies to every deploy, taps included: it is the game's only resource clock,
-## so it also sets how long the player has to read the board between decisions.
-## Fast enough to keep a siege flowing, slow enough that a deploy is a choice
-## rather than a reflex.
+## One tap scrambles a flight, not a single bird. A lone plane trickling out
+## every half second made a deploy feel like nothing; four leaving together read
+## as an order given, and a flight arriving at once is something the fort has to
+## answer all at once rather than picking off one at a time.
+const PLANES_PER_SORTIE := 4
+## Lateral spacing inside the flight, perpendicular to its run in.
+const SORTIE_SPREAD := 27.0
+## Scramble stagger between wingmen so the flight rolls out instead of popping.
+const SORTIE_STAGGER := 0.07
+
+## Per-bird gap on the deck — lighter wings scramble faster. The gap between
+## *sorties* is this times the flight size, so the wing still leaves at the same
+## rate and the resource clock is unchanged; it just arrives in fours.
+## It is the game's only resource clock, so it also sets how long the player has
+## to read the board between decisions.
 const PLANE_DEPLOY_INTERVALS := {
 	PlaneType.STRIKE: 0.5,
 	PlaneType.GUNSHIP: 0.62,
@@ -251,8 +261,14 @@ func plane_name_for_level(level: int) -> String:
 	return PLANE_TYPE_NAMES[plane_type_for_level(level)]
 
 
-func deploy_interval_for_plane(plane_type: PlaneType) -> float:
+## Gap between one bird and the next inside a flight.
+func plane_interval_for_plane(plane_type: PlaneType) -> float:
 	return PLANE_DEPLOY_INTERVALS.get(plane_type, PLANE_DEPLOY_INTERVALS[PlaneType.BOMBER])
+
+
+## Gap between sorties — the rate the player actually taps at.
+func deploy_interval_for_plane(plane_type: PlaneType) -> float:
+	return plane_interval_for_plane(plane_type) * float(PLANES_PER_SORTIE)
 
 
 func deploy_interval_for_level(level: int) -> float:

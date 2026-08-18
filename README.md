@@ -12,7 +12,7 @@ godot --path .
 
 Or open this folder in the Godot 4.7 editor and press Play.
 
-**Controls:** tap / click the blue water around the island to deploy a plane, or hold to stream them. Birds leave the deck on a fixed scramble gap, so mashing gains you nothing — **where** each one enters is the whole game.
+**Controls:** tap / click the blue water around the island to send a **flight of four**, or hold to keep them coming. The wing leaves the deck at a fixed rate, so mashing gains you nothing — **where** you send each flight is the whole game.
 
 Read the water before you tap. Every corner gun owns a sector, drawn on the sea as a warm wedge; the cool gaps between sectors are the safe lanes in. A wedge that brightens is a gun that has locked onto one of your birds and is about to fire — and a gun stays committed for over a second, so a bird sent into a hot sector buys the next one a clean run. Silence a gun and its sector goes dark for good.
 
@@ -97,7 +97,7 @@ Orientation is locked to portrait in the preset.
 
 - Levels: 20 procedural islands in one ocean; camera pans between them
 - Framing: the camera zooms out per bastion (0.8 down to ~0.6) so the island plus a ~120 px ring of tappable water always fits across the screen. Not cosmetic — at a fixed zoom the level 15 and 20 islands were wider than the viewport, leaving no water to tap east or west and removing those approach bearings from the game entirely
-- Deploy rate: one bird per scramble gap (0.5–1.0 s by wing) for taps *and* holds — the only resource clock in the game
+- Deploy rate: one flight of 4 per sortie gap (4 × the 0.5–1.0 s per-bird gap, by wing) for taps *and* holds — the only resource clock in the game. Birds leave at the same rate as before; they just arrive together, and a fort that commits to one target at a time cannot pick a flight off one by one
 - Squadron: sized per wing, from measured good-play runs — gunship 36→48, bomber 38→54, strike 42→54, carpet 56→76
 - Wings by level band: gunship 1–5 (SEAD — prefer corner AA, 5 strafe shots × 4 dmg), bomber 6–10 (one 20-dmg bomb), strike 11–15 (guided missile, 20 dmg, launched 230 px out — scales with AA reach), carpet 16–20 (3 bombs × 10 dmg along the keep track)
 - Keep HP: 100 + 4×(level−1); corner AA and outer towers scale up

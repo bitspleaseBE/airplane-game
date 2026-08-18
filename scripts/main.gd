@@ -34,6 +34,9 @@ var _hold_pos: Vector2 = Vector2.ZERO
 ## instead would read as the game ignoring taps.
 var _queued_pos: Vector2 = Vector2.ZERO
 var _has_queued: bool = false
+## Bumped whenever the board is cleared, so wingmen still waiting out their
+## scramble stagger are abandoned rather than launched into the next siege.
+var _sortie_gen: int = 0
 var _islands: Array[Island] = []
 ## Empty tropical islets between bastions — not playable targets.
 var _scenic_islands: Array[Island] = []
@@ -288,17 +291,58 @@ func _try_spawn(world_pos: Vector2, from_press: bool = false) -> void:
 	if not _is_deployable(world_pos):
 		return
 
-	var center := active_center
 	var plane_type: GameConfig.PlaneType = GameConfig.plane_type_for_level(current_level)
 	_spawn_cooldown = GameConfig.deploy_interval_for_plane(plane_type)
-	planes_remaining -= 1
-	active_planes += 1
-	planes_deployed += 1
+	_launch_sortie(world_pos, plane_type)
+
+
+## One tap sends a flight. Wingmen fan out abreast of the run in and roll off
+## the deck a beat apart, so the tap reads as an order rather than a single
+## bird, and the fort has to answer four birds at once instead of picking them
+## off one at a time.
+func _launch_sortie(world_pos: Vector2, plane_type: GameConfig.PlaneType) -> void:
+	var count := mini(GameConfig.PLANES_PER_SORTIE, planes_remaining)
+	if count <= 0:
+		return
+	var center := active_center
+	var run_in := center - world_pos
+	var abreast := (
+		Vector2.from_angle(run_in.angle() + PI * 0.5)
+		if run_in.length_squared() > 0.001
+		else Vector2.UP
+	)
+	# Centre the formation on the tap so the player's finger marks the flight,
+	# not its left wingman.
+	var mid := (float(count) - 1.0) * 0.5
+	for i in count:
+		var slot := world_pos + abreast * ((float(i) - mid) * GameConfig.SORTIE_SPREAD)
+		# A wingman whose slot lands on sand falls back onto the tap itself.
+		if not _is_deployable(slot):
+			slot = world_pos
+		planes_remaining -= 1
+		active_planes += 1
+		planes_deployed += 1
+		_spawn_plane(slot, center, plane_type, float(i) * GameConfig.SORTIE_STAGGER)
 	_emit_hud()
 
+
+func _spawn_plane(
+	spawn_pos: Vector2, center: Vector2, plane_type: GameConfig.PlaneType, delay: float
+) -> void:
+	if delay > 0.0:
+		# Counters were already banked by the caller, so a wingman still on the
+		# deck when the siege ends — or when the bastion is reset out from under
+		# it — must give its slot back instead of launching into the next one.
+		var gen := _sortie_gen
+		await get_tree().create_timer(delay).timeout
+		if gen != _sortie_gen or state != State.PLAYING or not is_instance_valid(planes):
+			if gen == _sortie_gen:
+				active_planes = max(active_planes - 1, 0)
+				_check_squadron_spent()
+			return
 	var plane: PlaneUnit = _plane_scene.instantiate()
 	planes.add_child(plane)
-	plane.setup(world_pos, center, self, plane_type)
+	plane.setup(spawn_pos, center, self, plane_type)
 	plane.finished.connect(_on_plane_finished)
 	plane.exploded.connect(_on_plane_exploded)
 
@@ -892,6 +936,7 @@ func _clear_combatants() -> void:
 	_holding = false
 	_has_queued = false
 	_spawn_cooldown = 0.0
+	_sortie_gen += 1
 	for p in planes.get_children():
 		p.queue_free()
 	for b in bullets.get_children():
