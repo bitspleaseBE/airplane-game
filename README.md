@@ -104,6 +104,7 @@ Orientation is locked to portrait in the preset.
 - Corner AA: each gun covers a ~120° sector centred on its current facing and cannot traverse past it. Four live guns close the ring, three leave a usable gap, two leave the island open. Reach scales with the island (capped at 470) so the contested water stays a real space on the big late strongholds
 - Sectors slew: a mount swings its whole sector toward sustained pressure (up to ~57° off its corner) and drifts back when the sky clears. This is what forces the attack to keep moving — a fixed bearing gets answered and shut
 - Corner AA leads its target, commits to it for 1.25 s, and traverses at 1.5 rad/s — slower than a bird's run in, which is what makes baiting work
+- Gun cycle times (0.7 s, 0.42 s from bastion 5) are sized against a *flight*, not a single bird: a gun that cannot break most of a four-ship sortie crossing its sector cannot punish a lane at all, and once no lane can be punished, saturation beats geometry and one bearing wins again
 - Outer towers traverse freely but reach short: the close-in punish for overflying, not the strategic ring
 - Stronghold arsenal: machine guns from level 1, missile launchers from 4, flak airbursts from 13 (downs every plane within 60 px of the burst)
 - Difficulty is staggered one step at a time: third corner gun at 3, missile launcher at 4, faster gun cycle at 5

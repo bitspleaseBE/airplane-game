@@ -143,13 +143,19 @@ const PLANE_DEPLOY_INTERVALS := {
 }
 
 const TURRET_RANGE := 360.0
-const TURRET_FIRE_COOLDOWN := 1.2
+## Cycle times are sized against a *flight*, not a single bird. Birds arrive
+## four abreast now, so a gun that only cycles twice while they cross its sector
+## cannot meaningfully answer them however well it is aimed — and once no gun
+## can punish a lane, saturation beats geometry and picking one bearing wins
+## again. Fast enough to break most of a flight it is pointed at, which also
+## sharpens the read: a hot lane costs you the sortie, a cold one costs nothing.
+const TURRET_FIRE_COOLDOWN := 0.7
 ## Corner guns reach farther from bastion 3, and cycle faster from bastion 5.
 ## Staggered on purpose: landing both upgrades on the same level alongside the
 ## third gun and a denser tower ring made bastion 3 a wall, and broke the
 ## one-new-thing-per-level rule four ways at once.
 const TURRET_RANGE_HOT := 410.0
-const TURRET_FIRE_COOLDOWN_HOT := 0.75
+const TURRET_FIRE_COOLDOWN_HOT := 0.42
 const TURRET_COOLDOWN_HOT_LEVEL := 5
 ## Depth of covered water a corner gun holds beyond its own shoreline. Islands
 ## nearly double in radius across the campaign; a flat range meant that by the
