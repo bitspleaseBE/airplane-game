@@ -30,6 +30,10 @@ var campaign_guns_destroyed: int = 0
 var _spawn_cooldown: float = 0.0
 var _holding: bool = false
 var _hold_pos: Vector2 = Vector2.ZERO
+## Virtual cursor for keyboard / gamepad. Inactive until one of them is used,
+## so a mouse or touch player never sees it.
+var _cursor_active: bool = false
+var _cursor_pos: Vector2 = GameConfig.ISLAND_CENTER
 ## A press that arrived mid-scramble, held until the deck is clear. Dropping it
 ## instead would read as the game ignoring taps.
 var _queued_pos: Vector2 = Vector2.ZERO
@@ -71,6 +75,14 @@ const OCEAN_INFLUENCE_MARGIN := 700.0
 ## the margin above, so the uploaded set is never stale enough to show.
 const OCEAN_RECULL_STEP := 64.0
 
+## Keyboard / gamepad aiming. The reticle has to cross the tappable ring in
+## about the time a bird takes to fly in, or moving the attack around the island
+## costs more than the scramble gap it is meant to fit inside.
+const CURSOR_SPEED := 620.0
+## Below this a stick reading is drift, not intent — a nudged reticle that never
+## stops moving is worse than none.
+const CURSOR_DEADZONE := 0.22
+
 ## Camera position the ocean uniforms were last culled for.
 var _ocean_uniform_pos := Vector2(INF, INF)
 
@@ -82,6 +94,8 @@ var _ocean_uniform_pos := Vector2(INF, INF)
 @onready var effects: Node2D = $Effects
 @onready var hud: CanvasLayer = $HUD
 @onready var ocean: ColorRect = $Camera/Ocean
+@onready var reticle: DeployReticle = $Reticle
+@onready var pause_menu: CanvasLayer = $PauseMenu
 
 var _plane_scene: PackedScene = preload("res://scenes/plane.tscn")
 var _explosion_scene: PackedScene = preload("res://scenes/explosion.tscn")
@@ -97,7 +111,10 @@ var keep: Keep:
 
 
 func _ready() -> void:
-	randomize()
+	# A harness run with an explicit --seed owns the global RNG; randomizing
+	# here would throw it away and make every balance result unrepeatable.
+	if Playtest.requested_seed() < 0:
+		randomize()
 	_build_campaign()
 	_apply_open_ocean()
 	_apply_clouds_enabled()
@@ -105,6 +122,9 @@ func _ready() -> void:
 	_activate_level(1, false)
 	threat.setup(self)
 	hud.setup(self)
+	if pause_menu.has_method("setup"):
+		pause_menu.setup(self)
+	_cursor_pos = active_center
 	_emit_hud()
 	Sfx.start_island_ambient(self)
 
@@ -131,16 +151,46 @@ func _process(delta: float) -> void:
 	# Safety net: if the counter is empty and nothing's airborne, settle the siege.
 	if state == State.PLAYING and planes_remaining <= 0 and active_planes <= 0:
 		_check_squadron_spent()
+	_update_cursor(delta)
 	if state != State.PLAYING or not _holding:
 		return
-	_hold_pos = get_global_mouse_position()
+	_hold_pos = _cursor_pos if _cursor_active else get_global_mouse_position()
 	# Hold-to-repeat respects scramble gap; discrete presses bypass it.
 	if _spawn_cooldown <= 0.0:
 		_try_spawn(_hold_pos, false)
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	# Window-level hotkeys work whatever the siege is doing — a player who
+	# wants fullscreen or silence should not have to find a menu first.
+	if event.is_action_pressed("toggle_fullscreen"):
+		Settings.toggle_fullscreen()
+		get_viewport().set_input_as_handled()
+		return
+	if event.is_action_pressed("toggle_mute"):
+		Settings.toggle_muted()
+		get_viewport().set_input_as_handled()
+		return
+	# R re-flies the current bastion. Deliberately not wired on a win — there
+	# the player wants "next", and the modal already offers it.
+	if event.is_action_pressed("restart_level") and state in [State.PLAYING, State.LOST]:
+		retry_level()
+		get_viewport().set_input_as_handled()
+		return
+
 	if state != State.PLAYING:
+		_holding = false
+		return
+
+	# Keyboard / gamepad scramble at the reticle rather than at the pointer.
+	if event.is_action_pressed("deploy"):
+		_activate_cursor()
+		_holding = true
+		_hold_pos = _cursor_pos
+		_try_spawn(_hold_pos, true)
+		get_viewport().set_input_as_handled()
+		return
+	if event.is_action_released("deploy"):
 		_holding = false
 		return
 
@@ -150,8 +200,14 @@ func _unhandled_input(event: InputEvent) -> void:
 		"input_devices/pointing/emulate_touch_from_mouse", false
 	)
 
+	if event is InputEventMouseMotion and event.relative != Vector2.ZERO:
+		_cursor_active = false
+		reticle.visible = false
+
 	if event is InputEventScreenTouch:
 		if event.pressed:
+			_cursor_active = false
+			reticle.visible = false
 			_holding = true
 			_hold_pos = _screen_to_world(event.position)
 			_try_spawn(_hold_pos, true)
@@ -166,6 +222,43 @@ func _unhandled_input(event: InputEvent) -> void:
 			_try_spawn(_hold_pos, true)
 	elif not touch_from_mouse and event is InputEventMouseMotion and _holding:
 		_hold_pos = get_global_mouse_position()
+
+
+## Moves and paints the keyboard / gamepad reticle. Called every frame so the
+## readout of "would a scramble be accepted here" stays live as the fort
+## traverses, not only at the moment of a press.
+func _update_cursor(delta: float) -> void:
+	var stick := Input.get_vector("cursor_left", "cursor_right", "cursor_up", "cursor_down")
+	if stick.length() > CURSOR_DEADZONE:
+		_activate_cursor()
+		_cursor_pos += stick * CURSOR_SPEED * delta
+	elif not _cursor_active:
+		return
+
+	# Keep the reticle inside the water the camera is actually showing —
+	# walking it off screen loses the player their pointer entirely.
+	var half := get_viewport_rect().size * 0.5 / camera.zoom
+	var cam := camera.global_position
+	_cursor_pos.x = clampf(_cursor_pos.x, cam.x - half.x, cam.x + half.x)
+	_cursor_pos.y = clampf(_cursor_pos.y, cam.y - half.y, cam.y + half.y)
+
+	reticle.global_position = _cursor_pos
+	reticle.deployable = state == State.PLAYING and _is_deployable(_cursor_pos)
+	var gap := GameConfig.deploy_interval_for_level(current_level)
+	reticle.ready_fraction = 1.0 if gap <= 0.0 else 1.0 - clampf(_spawn_cooldown / gap, 0.0, 1.0)
+	reticle.visible = state == State.PLAYING
+
+
+func _activate_cursor() -> void:
+	if _cursor_active:
+		return
+	_cursor_active = true
+	# Start from wherever the pointer last was, so switching input mid-siege
+	# does not teleport the aim across the island.
+	var mouse := get_global_mouse_position()
+	_cursor_pos = mouse if mouse.distance_to(active_center) < 2000.0 else active_center
+	reticle.global_position = _cursor_pos
+	reticle.visible = true
 
 
 func _screen_to_world(screen_pos: Vector2) -> Vector2:
@@ -365,6 +458,9 @@ func _set_won() -> void:
 		used, _last_keep_max_hp, _last_gun_count, squadron_size, current_level
 	)
 	var campaign_done := current_level >= GameConfig.LEVEL_COUNT
+	# Banked before the modal opens, so a player who alt-F4s on the win screen
+	# still keeps the bastion and the stars they just earned.
+	Settings.record_win(current_level, last_stars)
 	game_won.emit(last_stars, campaign_done)
 
 
@@ -573,6 +669,12 @@ func _camera_kick(strength: float = 4.0) -> void:
 	## Short screen nudge — juice without wrecking aim readability.
 	if camera == null:
 		return
+	var shake_scale := Settings.screen_shake
+	if Settings.reduced_motion:
+		shake_scale = minf(shake_scale, 0.25)
+	if shake_scale <= 0.01:
+		return
+	strength *= shake_scale
 	var base := camera.offset
 	var kick := Vector2(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)).normalized() * strength
 	var tw := create_tween()

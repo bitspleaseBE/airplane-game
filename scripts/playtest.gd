@@ -41,6 +41,10 @@ var _force_wing_name := "bomber"
 var _force_lose := false
 var _force_win := false
 var _force_campaign_win := false
+## UI-only captures. The pause panel and the aiming reticle are both built in
+## code, so a screenshot is the only thing that catches a layout regression.
+var _show_pause := ""
+var _show_reticle := false
 var _squadron_cap := -1
 var _perf := false
 var _ocean_mode := ""  # "" (normal) | "flat" | "off"
@@ -59,6 +63,15 @@ var _input_taps := 0
 var _direct_spawns := 0
 var _missed_deploys := 0
 var _deployed := 0
+
+
+## The seed the harness was asked to run, or -1 for none. Read by main.gd,
+## which must not call randomize() over the top of a requested seed — that is
+## what made the balance gate non-reproducible: --seed was set here, then
+## clobbered a frame later when the level scene came up, so Gate 1 was really
+## measuring run-to-run noise.
+func requested_seed() -> int:
+	return _rng_seed
 
 
 func _ready() -> void:
@@ -107,6 +120,14 @@ func _ready() -> void:
 			_duration = mini(_duration, 4.0)
 		elif arg.begins_with("--squadron="):
 			_squadron_cap = int(arg.trim_prefix("--squadron="))
+		elif arg == "--pause-menu" or arg.begins_with("--pause-menu="):
+			_show_pause = "root"
+			if arg.begins_with("--pause-menu="):
+				_show_pause = arg.trim_prefix("--pause-menu=").strip_edges().to_lower()
+			_planes_to_spawn = 0
+			_duration = minf(_duration, 4.0)
+		elif arg == "--reticle":
+			_show_reticle = true
 		elif arg == "--perf":
 			_perf = true
 		elif arg.begins_with("--ocean="):
@@ -119,6 +140,8 @@ func _ready() -> void:
 		RenderingServer.viewport_set_measure_render_time(get_viewport().get_viewport_rid(), true)
 		# Periodic screenshots stall the pipeline (GPU readback) — start/end only.
 		_shot_interval = 100000.0
+	if not _show_pause.is_empty():
+		process_mode = Node.PROCESS_MODE_ALWAYS
 	if _rng_seed >= 0:
 		seed(_rng_seed)
 	DirAccess.make_dir_recursive_absolute(_abs_out())
@@ -212,6 +235,27 @@ func _run() -> void:
 					wing_type = GameConfig.PlaneType.BOMBER
 			hud_w.force_wing_briefing(wing_type)
 			await get_tree().create_timer(1.4).timeout
+
+	if _show_reticle:
+		# Nudging the reticle through the normal path is what proves the
+		# keyboard aim wiring works, not just that the node draws.
+		Input.action_press("cursor_right")
+		await get_tree().create_timer(0.35).timeout
+		Input.action_release("cursor_right")
+		await get_tree().process_frame
+
+	if not _show_pause.is_empty():
+		var menu := _main.get_node_or_null("PauseMenu")
+		if menu and menu.has_method("open"):
+			menu.open()
+			if _show_pause == "options" and menu.has_method("show_options"):
+				menu.show_options()
+			await get_tree().create_timer(0.3).timeout
+		await _screenshot("pause")
+		_result = "pause-menu"
+		_write_summary()
+		get_tree().quit(0)
+		return
 
 	await _screenshot("start")
 

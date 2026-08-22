@@ -2,7 +2,7 @@
 
 Portrait top-down siege game: tap the water around an island fortress to deploy bombers, dodge corner turrets, and bring down the keep.
 
-Built with **Godot 4.7** (Compatibility / GL renderer) for web, Android, and iOS.
+Built with **Godot 4.7** (Compatibility / GL renderer) for desktop (Windows / Linux / macOS), web, Android, and iOS.
 
 ## Play
 
@@ -12,7 +12,7 @@ godot --path .
 
 Or open this folder in the Godot 4.7 editor and press Play.
 
-**Controls:** tap / click the blue water around the island to deploy a plane, or hold to stream them. Birds leave the deck on a fixed scramble gap, so mashing gains you nothing — **where** each one enters is the whole game.
+**Controls:** tap / click the blue water around the island to deploy a plane, or hold to stream them. On desktop and controller, `WASD` / left stick walks an aiming reticle over the sea and `Space` / `A` scrambles at it — the reticle turns red over water a bird cannot launch from, and its inner arc is the scramble gap counting down. `Esc` / `Start` pauses, `F11` toggles fullscreen, `M` mutes, `R` re-flies the bastion. Birds leave the deck on a fixed scramble gap, so mashing gains you nothing — **where** each one enters is the whole game.
 
 Read the water before you tap. Every corner gun owns a sector, drawn on the sea as a warm wedge; the cool gaps between sectors are the safe lanes in. A wedge that brightens is a gun that has locked onto one of your birds and is about to fire — and a gun stays committed for over a second, so a bird sent into a hot sector buys the next one a clean run. Silence a gun and its sector goes dark for good.
 
@@ -31,6 +31,15 @@ tools/playtest.sh --planes=15 --duration=60   # full run to a win/lose ending
 
 Simulates taps, saves screenshots and a `summary.json` to `playtest/latest/`, and prints a `PLAYTEST_SUMMARY` JSON line. Agents follow the write code → playtest → improve loop in `.cursor/skills/playtest-loop/`.
 
+Extra capture flags: `--pause-menu` / `--pause-menu=options` shoot the pause
+panel (built in code, so a screenshot is the only layout regression test),
+and `--reticle` drives the keyboard aim path so the crosshair appears in the
+frames.
+
+`--seed=N` is now authoritative: the level scene used to call `randomize()`
+after the harness seeded, so every "seeded" balance result was really
+run-to-run noise. Same seed, same outcome.
+
 Strategies are `spread` / `blitz` / `waves` (random placement), `flank` (re-reads the board before every deploy and moves to whatever water is quiet now), and `column` (locks the quietest bearing once and commits the whole squadron to it). The pair that matters is **`flank` must win where `column` fails** — that is the measurement that the siege still demands changing direction. See `.cursor/skills/design-gates/`.
 
 ## Project layout
@@ -41,6 +50,37 @@ Strategies are `spread` / `blitz` / `waves` (random placement), `flank` (re-read
 - `inspiration/` — original Kenney packs (ignored by Godot via `.gdignore`)
 - `blueprint.md` — design decisions
 - `build/` — export output (created when you export)
+
+## Options and saves
+
+`Esc` opens the pause menu; **Options** covers master / effects / music /
+ambience levels, fullscreen, v-sync, screen-shake strength, reduced motion,
+and a colourblind mode for the threat overlay. The entire tactical read is a
+warm wedge over cool sea, which is exactly the contrast a red-green deficiency
+loses, so the wedge hue and its alpha are both settings rather than constants.
+
+Everything persists to `user://settings.cfg` — settings, campaign progress
+(highest bastion reached), and the best star rating per bastion. Stars only
+ever improve, so replaying a cleared bastion can't cost you a rating. On the
+web build `user://` is browser storage; on desktop it is the platform's app
+data directory.
+
+## Desktop export
+
+Presets: `Windows Desktop`, `Linux`, `macOS`. Requires Godot **4.7.1** export
+templates.
+
+```bash
+mkdir -p build/linux build/windows build/macos
+godot --headless --path . --export-release "Linux"           build/linux/BastionBomber.x86_64
+godot --headless --path . --export-release "Windows Desktop" build/windows/BastionBomber.exe
+godot --headless --path . --export-release "macOS"           build/macos/BastionBomber.zip
+```
+
+The window opens at 576×1024 and is resizable; the viewport is 720×1280 with
+`expand` stretch, so a wider window shows more ocean rather than stretching the
+island. macOS needs codesign identity / team id filled into the preset before
+a distributable build.
 
 ## Web export
 
