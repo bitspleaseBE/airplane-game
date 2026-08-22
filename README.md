@@ -173,7 +173,17 @@ Orientation is locked to portrait in the preset.
 - Stronghold arsenal: machine guns from level 1, missile launchers from 4, flak airbursts from 13 (downs every plane within 60 px of the burst)
 - Difficulty is staggered one step at a time: third corner gun at 3, missile launcher at 4, faster gun cycle at 5
 - Defense pads are color-coded: red = keep AA, green = MG, amber = missile, crimson = flak
-- **Known gap — stronghold gun placement.** `island.gd::_place_turrets` seats all
+- **Known gap — a fixed bearing still wins about one run in three.** Measured
+  across 4 bastions x 3 seeds: adaptive play (`flank`) wins 12/12, spending
+  53-92% of the wing, so every bastion is comfortably winnable. But `column`
+  still wins 1 of 3 runs at *every* level tested (5, 10, 15, 20), including all
+  three milestone strongholds where it must never win. The uniformity is the
+  clue: this is not per-level tuning, it is that some bearings on some layouts
+  are permanently soft, and `column` picks from the coldest seven bearings at
+  random — so roughly a third of the time it finds one. What the retune did buy
+  is cost: taking the finale on a locked bearing went from 13 birds of 76 to 38
+  of 40. The margin is gone even where the rule still fails
+- **Known gap — stronghold gun placement, probably the same bug.** `island.gd::_place_turrets` seats all
   four corner guns at a fixed ~105 px from the island centre
   (`FORT_CLEAR_RADIUS * 0.95`) whatever the island's size, because they sit on
   the fort sprite's corner towers. On the 240-radius opener that is a real ring;

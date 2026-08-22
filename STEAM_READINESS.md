@@ -131,7 +131,49 @@ I reported bastion 5 taking ~152 s against a 30-90 s target. That was a
 headless artifact. Rendered, wins land in **12-33 s** — the levels are too
 *short*, not too long, and the campaign is under 15 minutes, not 50.
 
-### Open, and now the highest-value gameplay work: the campaign is far too loose
+### Iteration 3 — the ordnance economy, and a correction
+
+Retuned keep HP, squadrons, emplacement HP, sector slew, AA reach and the carpet
+release point over six measured rounds. Good play now spends **53-92%** of the
+wing (was 21-50%) and wins land in **18-47 s** (was 12-19 s). Every bastion
+stays winnable: `flank` won 12/12 across bastions 5/10/15/20 x 3 seeds.
+
+**Correction to what this file said an hour ago.** I reported gate 1 as fixed at
+bastions 5, 15, 16 and 20 on the strength of one or two seeds each. With three
+seeds that is wrong: `column` still wins **1 run in 3 at every level tested**,
+strongholds included. Single-seed cells on this game are not evidence — the
+squadron size perturbs the shared RNG stream, so `--seed` does not isolate
+placement, and any cell decided by a few birds is noise. Only wide-margin cells
+(column spending 100% and leaving the keep above 40%) are trustworthy.
+
+What the retune did buy, and it is not small: taking the finale on a locked
+bearing went from 13 birds of 76 to 38 of 40. The rule still fails, but the
+margin is gone.
+
+### Open: gate 1, and the structural cause
+
+`island.gd::_place_turrets` seats all four corner guns at a fixed
+`FORT_CLEAR_RADIUS * 0.95` (~105 px) from the island centre whatever the
+island's size, because they sit on the fort sprite's corner towers. On the
+240-radius opener that is a real ring; on the 460-radius finale it is a huddle
+in the middle, ~400 px from the shore it defends. "Four live guns close the ring,
+three leave a gap" — the stated spine of the tactics — degenerates as islands
+grow, which is why the milestone strongholds measure as the *easiest* levels in
+the campaign, and very likely why a third of locked bearings find soft water.
+
+Two ways to fix it, and the choice is a design call because it is visible:
+
+1. **Scale the fort with the island** — mounts stay on the sprite's corners, the
+   whole fortress grows with its isle. Keeps the art relationship, changes the
+   silhouette of every late bastion.
+2. **Decouple the mounts** — guns move out to a real defensive ring at a
+   fraction of the island radius, no longer sitting on the fort. Truer to the
+   geometry the design describes, but the guns stop reading as part of the fort.
+
+Recommend (1): it preserves what the art is saying and it makes the late
+bastions look like the strongholds they are meant to be.
+
+### Superseded: the campaign is far too loose
 
 Rendered matrix, full squadron, bastions 5 and 10:
 
