@@ -131,15 +131,22 @@ func _is_engageable(plane: PlaneUnit) -> bool:
 	return global_position.distance_to(plane.global_position) <= _range
 
 
+## Outer towers fall for a decoy the same way corner AA does — see
+## Turret._lure_score. The range gate stays on true distance; the discount only
+## reorders contacts already in reach.
 func _nearest_plane() -> PlaneUnit:
 	var best: PlaneUnit = null
-	var best_d := _range
+	var best_score := INF
 	for child in _main.get_planes():
 		if child is PlaneUnit and child.phase == PlaneUnit.Phase.FLYING:
 			var d: float = global_position.distance_to(child.global_position)
-			if d < best_d:
-				best_d = d
-				best = child
+			if d >= _range:
+				continue
+			var score: float = d * GameConfig.DECOY_LURE_BIAS if child.is_decoy else d
+			if score >= best_score:
+				continue
+			best_score = score
+			best = child
 	return best
 
 

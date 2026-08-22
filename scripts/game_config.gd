@@ -73,6 +73,47 @@ const CARPET_START_RANGE := 265.0
 ## survive the run they are forced to make.
 const CARPET_SPEED_MULT := 1.2
 
+## --- Decoy drones ---------------------------------------------------------
+##
+## The player's only verb used to be *where*: read which water is cold, tap it.
+## That makes the fortress the active party and the squadron the reactive one,
+## and it is why a 48-bird siege is 48 near-identical decisions.
+##
+## The fort already commits each gun to one bird for TURRET_TARGET_LOCK_TIME and
+## slews whole sectors toward sustained pressure. A decoy turns both of those
+## from things the player reads into things the player causes: spend a charge to
+## pull the north mounts off their corner, then push the real wave through the
+## hole it leaves. Same fortress, second verb.
+##
+## Decoys carry no ordnance and cost no squadron — but they do leave the same
+## deck, so they consume a scramble gap. That is what keeps the choice real: a
+## decoy is paid for with a bomber's slot in time, not with nothing.
+const DECOY_MAX_CHARGES := 3
+const DECOY_START_CHARGES := 2
+const DECOY_RECHARGE_SEC := 11.0
+## Hits before it goes down. A one-hit decoy dies to the first bullet and buys
+## nothing at all; three is what makes it hold a lock long enough for the next
+## two or three birds to be the point.
+const DECOY_HITS := 3
+## Seconds it will loiter before turning for home. Long enough to drag a sector
+## most of the way across its slew span, short enough that a charge spent on the
+## wrong side is a mistake the player has to live with.
+const DECOY_LIFETIME := 7.5
+const DECOY_SPEED_MULT := 0.82
+## How much closer to a gunner a decoy looks than it really is. Gun target
+## selection is nearest-first, so the lure is a distance discount rather than a
+## separate priority pass — it stays a preference, not an override, and a bomber
+## flying right down a barrel is still the shot the crew takes.
+const DECOY_LURE_BIAS := 0.55
+## Loiter radius as a fraction of the corner guns' reach. Deep enough to sit
+## well inside the AA envelope and keep pulling, shallow enough that it is not
+## simply orbiting inside the fort.
+const DECOY_ORBIT_FRACTION := 0.62
+## Floor on that radius so a decoy never tries to loiter on the beach.
+const DECOY_ORBIT_MIN_MARGIN := 40.0
+const DECOY_TINT := Color(1.0, 0.86, 0.42)
+const DECOY_SPRITE_SCALE := Vector2(0.92, 0.92)
+
 ## Stronghold evolution — staggered so no level introduces two new things.
 const MISSILE_TOWER_UNLOCK_LEVEL := 4
 const FLAK_TOWER_UNLOCK_LEVEL := 13
@@ -334,6 +375,11 @@ func turret_range_for_level(level: int) -> float:
 func turret_cooldown_for_level(level: int) -> float:
 	var n := clampi(level, 1, LEVEL_COUNT)
 	return TURRET_FIRE_COOLDOWN_HOT if n >= TURRET_COOLDOWN_HOT_LEVEL else TURRET_FIRE_COOLDOWN
+
+
+## Where a decoy settles into its orbit, for the given island and gun reach.
+func decoy_orbit_radius(island_radius: float, gun_range: float) -> float:
+	return maxf(gun_range * DECOY_ORBIT_FRACTION, island_radius + DECOY_ORBIT_MIN_MARGIN)
 
 
 ## Rough keep punch per bird — used for star thresholds across wing types.

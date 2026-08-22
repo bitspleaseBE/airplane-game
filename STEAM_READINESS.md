@@ -39,6 +39,9 @@ The three things that decide it:
 
 ## P1 — decides whether it reads as premium
 
+- [x] A second verb. Placement was the only decision; decoy drones let the
+      player *cause* the gap instead of only finding it
+
 - [ ] Music. A silent Steam game reads as unfinished (blueprint deferred it)
 - [ ] Content volume: 20 bastions is ~30 min. Needs 3–5× that, or a mode that
       makes the existing content replayable (endless / daily / challenge)
@@ -99,6 +102,65 @@ bastion 5 takes ~152 s against a 30–90 s target — and it is not my change,
 15–20 the gate asks for. For a Steam release that is arguably the *right*
 direction and the gate is the thing that is wrong, but it is a design call, so
 it is flagged here rather than quietly retuned.
+
+### Iteration 2 — the second verb, and the measurement that was lying
+
+Landed the **decoy drone / FEINT** layer. The fortress already commits each gun
+to one bird for 1.25 s and slews whole sectors toward pressure; `turret.gd`'s
+own comments said a decoy "genuinely buys the next wave a window", and nothing
+in the game could throw one. Now: a charge arms the next tap, the drone carries
+no payload, soaks three hits, loiters inside the AA envelope, and reads closer
+to a gunner than it really is — so it wins target selection against a real bird
+at similar range. Charges recharge on a timer, but a drone burns a scramble
+gap, so a feint is paid for with a bomber's slot in time.
+
+Measured at bastion 5, same seed, rendered: `column` alone spends 46 birds,
+`column` + feints spends 27 for the same win, with 6 bullets soaked by drones.
+That is the ability doing what it is for.
+
+**Fixed the harness lie underneath it.** Balance was being measured headless.
+The dummy renderer does not play the same game: the same level and seed resolve
+in ~150 s headless and ~25 s rendered, with *opposite* outcomes. Combined with
+the `--seed` bug from iteration 1, no design gate has been measured correctly
+in some time. `tools/balance_check.sh` now wraps xvfb, uses a real resolution,
+and includes `column` and `decoy` in its strategy set.
+
+### Corrected: the duration finding from iteration 1 was wrong
+
+I reported bastion 5 taking ~152 s against a 30-90 s target. That was a
+headless artifact. Rendered, wins land in **12-33 s** — the levels are too
+*short*, not too long, and the campaign is under 15 minutes, not 50.
+
+### Open, and now the highest-value gameplay work: the campaign is far too loose
+
+Rendered matrix, full squadron, bastions 5 and 10:
+
+| Bastion | strategy | seed 7 | seed 11 |
+|---|---|---|---|
+| 5 | column | won, 46 birds | won, 31 birds |
+| 5 | decoy | won, 27 birds | won, 26 birds |
+| 5 | flank | won, 24 birds | won, 25 birds |
+| 10 | column | lost | **won, 32 birds** |
+| 10 | decoy | lost | won, 24 birds |
+| 10 | flank | won, **16 of 54** | won, **12 of 54** |
+
+Two failures, both pre-dating this work:
+
+1. **Gate 1 is broken.** `column` must fail from bastion 3 on, and must *never*
+   win a milestone stronghold. It wins bastion 5 twice out of two and bastion
+   10 once out of two. The commit before this one was titled "make the siege
+   about changing direction" and was validated against the broken seed — so the
+   rule it added has never actually been measured.
+2. **Squadrons are 3-4x oversized.** `flank` clears the bastion 10 stronghold
+   on 12-16 birds of 54. The design-gates skill names this exact failure: "If a
+   level can be won on a third of its squadron, losses never bite and no
+   placement decision can show up in the result." That is *the* reason a
+   48-bird siege feels like 48 identical decisions, and tightening the squadron
+   is the remedy the skill prescribes.
+
+This is the next iteration: retune squadron sizes and the defensive ring
+against the rendered matrix until `column` fails where it must and a good siege
+ends with roughly a third of the wing spare.
 
 **Open: widescreen framing.** The exported desktop build at 1280×800 was
 captured mid-siege: playable, but the island is a small object in a large

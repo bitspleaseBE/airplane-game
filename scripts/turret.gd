@@ -164,15 +164,27 @@ func _slew_sector(delta: float) -> void:
 ## the mount traverse to meet it. INF when the sky is clear.
 func _contact_bearing() -> float:
 	var best := INF
-	var best_d := _range
+	var best_score := INF
 	for child in _main.get_planes():
 		if child is PlaneUnit and child.phase == PlaneUnit.Phase.FLYING:
 			var to: Vector2 = child.global_position - global_position
 			var d: float = to.length()
-			if d < best_d:
-				best_d = d
+			if d >= _range:
+				continue
+			var score := _lure_score(child, d)
+			if score < best_score:
+				best_score = score
 				best = to.angle()
 	return best
+
+
+## Distance as the crew perceives it. A decoy reads closer than it is, so it
+## wins target selection and sector slew against a real bird at similar range —
+## which is the entire mechanism the player's decoy charge buys. The true range
+## gate is applied before this, so the discount only ever reorders contacts the
+## mount could already engage; it never extends its reach.
+func _lure_score(plane: PlaneUnit, distance: float) -> float:
+	return distance * GameConfig.DECOY_LURE_BIAS if plane.is_decoy else distance
 
 
 ## Hold the current bird until it dies, leaves, or the lock expires; only then
@@ -200,12 +212,12 @@ func _is_engageable(plane: PlaneUnit) -> bool:
 
 func _nearest_plane() -> PlaneUnit:
 	var best: PlaneUnit = null
-	var best_d := _range
+	var best_score := INF
 	for child in _main.get_planes():
 		if child is PlaneUnit and child.phase == PlaneUnit.Phase.FLYING:
 			var to: Vector2 = child.global_position - global_position
 			var d: float = to.length()
-			if d >= best_d:
+			if d >= _range:
 				continue
 			# Skip planes we can't bring the barrel onto (deep in the keep wedge)
 			# or whose shot line would punch through the keep.
@@ -213,7 +225,10 @@ func _nearest_plane() -> PlaneUnit:
 				continue
 			if _shot_hits_keep(child.global_position):
 				continue
-			best_d = d
+			var score := _lure_score(child, d)
+			if score >= best_score:
+				continue
+			best_score = score
 			best = child
 	return best
 

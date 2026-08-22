@@ -12,11 +12,13 @@ godot --path .
 
 Or open this folder in the Godot 4.7 editor and press Play.
 
-**Controls:** tap / click the blue water around the island to deploy a plane, or hold to stream them. On desktop and controller, `WASD` / left stick walks an aiming reticle over the sea and `Space` / `A` scrambles at it — the reticle turns red over water a bird cannot launch from, and its inner arc is the scramble gap counting down. `Esc` / `Start` pauses, `F11` toggles fullscreen, `M` mutes, `R` re-flies the bastion. Birds leave the deck on a fixed scramble gap, so mashing gains you nothing — **where** each one enters is the whole game.
+**Controls:** tap / click the blue water around the island to deploy a plane, or hold to stream them. Press **FEINT** (or `Q` / gamepad X) and your next tap sends a decoy drone instead. On desktop and controller, `WASD` / left stick walks an aiming reticle over the sea and `Space` / `A` scrambles at it — the reticle turns red over water a bird cannot launch from, and its inner arc is the scramble gap counting down. `Esc` / `Start` pauses, `F11` toggles fullscreen, `M` mutes, `R` re-flies the bastion. Birds leave the deck on a fixed scramble gap, so mashing gains you nothing — **where** each one enters is the whole game.
 
 Read the water before you tap. Every corner gun owns a sector, drawn on the sea as a warm wedge; the cool gaps between sectors are the safe lanes in. A wedge that brightens is a gun that has locked onto one of your birds and is about to fire — and a gun stays committed for over a second, so a bird sent into a hot sector buys the next one a clean run. Silence a gun and its sector goes dark for good.
 
 **Keep moving.** Sectors are not fixed. Lean on one lane and the mounts traverse to meet you — you will watch the wedges swing across your approach and shut it. Find the next quiet water, hit from there, and let the fort chase. A squadron flown down a single bearing gets ground down; on the milestone strongholds it simply fails.
+
+**Feint to make your own lane.** A decoy drone carries nothing and soaks three hits, and the fort's crews would rather shoot at it than at your bombers — so a feint thrown ~50° off your attack bearing walks the mounts guarding that lane away from it. Charges come back on a timer, but a drone leaves the same deck as a bomber, so every feint costs you a bird's slot in time. Feints are the difference between finding the quiet water and *making* it.
 
 Destroy the central keep to win; spend the squadron with the keep still standing and you lose. Beat a bastion to pan to the next of 20 islands.
 
@@ -40,7 +42,15 @@ frames.
 after the harness seeded, so every "seeded" balance result was really
 run-to-run noise. Same seed, same outcome.
 
-Strategies are `spread` / `blitz` / `waves` (random placement), `flank` (re-reads the board before every deploy and moves to whatever water is quiet now), and `column` (locks the quietest bearing once and commits the whole squadron to it). The pair that matters is **`flank` must win where `column` fails** — that is the measurement that the siege still demands changing direction. See `.cursor/skills/design-gates/`.
+**Never run a balance scenario with `--headless`.** The dummy renderer does not
+play the same game. Measured side by side on the same level and seed, a siege
+resolved in ~150 s headless and ~25 s rendered, with *opposite* win/lose
+outcomes — every threshold in `.cursor/skills/design-gates/` is calibrated
+against a real renderer, so a headless number is a different game rather than a
+rougher version of the same one. `tools/balance_check.sh` and
+`tools/perf_check.sh` both wrap Godot in `xvfb` when there is no display.
+
+Strategies are `spread` / `blitz` / `waves` (random placement), `flank` (re-reads the board before every deploy and moves to whatever water is quiet now), `column` (locks the quietest bearing once and commits the whole squadron to it), and `decoy` (flies `column`, but buys that one bearing with feints thrown just outside it). The pair that matters is **`flank` must win where `column` fails** — that is the measurement that the siege still demands changing direction. See `.cursor/skills/design-gates/`.
 
 ## Project layout
 

@@ -7,6 +7,7 @@ signal keep_hp_changed(current: int, maximum: int)
 signal game_won(stars: int, campaign_complete: bool)
 signal game_lost
 signal level_changed(level: int)
+signal decoys_changed(charges: int, max_charges: int, recharge_t: float)
 
 enum State { PLAYING, WON, LOST, TRANSITION }
 
@@ -26,6 +27,19 @@ var guns_destroyed: int = 0
 var campaign_planes_deployed: int = 0
 var campaign_planes_crashed: int = 0
 var campaign_guns_destroyed: int = 0
+
+## Bullets soaked by decoys this siege. Not shown to the player — it is the
+## balance signal for whether the feint layer is actually pulling fire.
+var decoy_hits_absorbed: int = 0
+
+## Decoy charges: the second verb. See GameConfig's decoy block.
+var decoy_charges: int = GameConfig.DECOY_START_CHARGES
+## Single-shot arm: the next deploy sends a drone instead of a bird, then the
+## arm clears. A held toggle turned into "did I leave it on?" every time the
+## board got busy, which is exactly the wrong thing to think about mid-siege.
+var decoy_armed: bool = false
+var _decoy_recharge: float = 0.0
+var _decoy_emit_accum: float = 0.0
 
 var _spawn_cooldown: float = 0.0
 var _holding: bool = false
@@ -82,6 +96,8 @@ const CURSOR_SPEED := 620.0
 ## Below this a stick reading is drift, not intent — a nudged reticle that never
 ## stops moving is worse than none.
 const CURSOR_DEADZONE := 0.22
+
+const DECOY_EMIT_INTERVAL := 0.1
 
 ## Camera position the ocean uniforms were last culled for.
 var _ocean_uniform_pos := Vector2(INF, INF)
@@ -144,6 +160,8 @@ func _process(delta: float) -> void:
 		if _drain_island_build_queue():
 			_build_drain_cd = 0.05
 	_spawn_cooldown = max(_spawn_cooldown - delta, 0.0)
+	if state == State.PLAYING:
+		_tick_decoy_recharge(delta)
 	if state == State.PLAYING and _has_queued and _spawn_cooldown <= 0.0:
 		var queued := _queued_pos
 		_has_queued = false
@@ -173,6 +191,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	# R re-flies the current bastion. Deliberately not wired on a win — there
 	# the player wants "next", and the modal already offers it.
+	if event.is_action_pressed("arm_decoy"):
+		toggle_decoy_arm()
+		get_viewport().set_input_as_handled()
+		return
 	if event.is_action_pressed("restart_level") and state in [State.PLAYING, State.LOST]:
 		retry_level()
 		get_viewport().set_input_as_handled()
@@ -294,6 +316,7 @@ func retry_level() -> void:
 	squadron_size = GameConfig.squadron_for_level(current_level)
 	planes_remaining = squadron_size
 	active_planes = 0
+	_reset_decoys()
 	_reset_siege_stats()
 	state = State.PLAYING
 	_emit_hud()
@@ -359,6 +382,97 @@ func _is_deployable(world_pos: Vector2) -> bool:
 	return true
 
 
+## --- decoys --------------------------------------------------------------
+
+
+func toggle_decoy_arm() -> void:
+	set_decoy_armed(not decoy_armed)
+
+
+func set_decoy_armed(on: bool) -> void:
+	var want := on and decoy_charges > 0 and state == State.PLAYING
+	if want == decoy_armed:
+		return
+	decoy_armed = want
+	_emit_decoys()
+
+
+func _reset_decoys() -> void:
+	decoy_hits_absorbed = 0
+	decoy_charges = GameConfig.DECOY_START_CHARGES
+	_decoy_recharge = 0.0
+	decoy_armed = false
+	_emit_decoys()
+
+
+func _tick_decoy_recharge(delta: float) -> void:
+	if decoy_charges >= GameConfig.DECOY_MAX_CHARGES:
+		if _decoy_recharge != 0.0:
+			_decoy_recharge = 0.0
+			_emit_decoys()
+		return
+	_decoy_recharge += delta
+	if _decoy_recharge >= GameConfig.DECOY_RECHARGE_SEC:
+		_decoy_recharge = 0.0
+		decoy_charges += 1
+		_decoy_emit_accum = DECOY_EMIT_INTERVAL
+	# The readout is a slowly filling pip, so pushing it at 10 Hz under 60 Hz
+	# gameplay is invisible and keeps a per-frame signal out of the main loop.
+	_decoy_emit_accum += delta
+	if _decoy_emit_accum >= DECOY_EMIT_INTERVAL:
+		_decoy_emit_accum = 0.0
+		_emit_decoys()
+
+
+func _emit_decoys() -> void:
+	var t := 0.0
+	if decoy_charges < GameConfig.DECOY_MAX_CHARGES:
+		t = clampf(_decoy_recharge / GameConfig.DECOY_RECHARGE_SEC, 0.0, 1.0)
+	decoys_changed.emit(decoy_charges, GameConfig.DECOY_MAX_CHARGES, t)
+
+
+## Sends a drone from `world_pos`. Costs a charge and a scramble gap but no
+## squadron — the trade is a bomber's slot in time, not a bird.
+##
+## Blocked once the squadron is spent: with nothing left to escort, a drone
+## would only stall the loss check while charges kept trickling back.
+func _try_decoy(world_pos: Vector2) -> void:
+	if decoy_charges <= 0 or planes_remaining <= 0:
+		set_decoy_armed(false)
+		return
+
+	decoy_charges -= 1
+	decoy_armed = false
+	# Decoys leave the same deck as the wing, so they burn the same gap. The
+	# gap is the whole economy; a free decoy would make spamming them correct.
+	_spawn_cooldown = GameConfig.deploy_interval_for_level(current_level)
+	active_planes += 1
+	_emit_decoys()
+
+	var island_radius: float = (
+		_active_island.island_radius if _active_island else GameConfig.ISLAND_RADIUS
+	)
+	var orbit := GameConfig.decoy_orbit_radius(
+		island_radius, GameConfig.turret_range_for_level(current_level)
+	)
+	var drone: PlaneUnit = _plane_scene.instantiate()
+	planes.add_child(drone)
+	drone.setup(world_pos, active_center, self, GameConfig.plane_type_for_level(current_level))
+	drone.setup_decoy(orbit)
+	drone.finished.connect(_on_plane_finished)
+	drone.exploded.connect(_on_decoy_exploded)
+
+
+## Decoys are expected to die — they do not count against the siege's crash
+## tally, which is what the star rating reads.
+func note_decoy_hit() -> void:
+	decoy_hits_absorbed += 1
+
+
+func _on_decoy_exploded(pos: Vector2) -> void:
+	_spawn_explosion(pos, 1.15, Boom.CRASH)
+
+
 ## from_press: true on click/tap — parks the request if the deck is still busy.
 ## false while holding or draining the queue — simply waits its turn.
 ##
@@ -379,6 +493,10 @@ func _try_spawn(world_pos: Vector2, from_press: bool = false) -> void:
 			_has_queued = true
 		return
 	if not _is_deployable(world_pos):
+		return
+
+	if decoy_armed:
+		_try_decoy(world_pos)
 		return
 
 	var center := active_center
@@ -684,6 +802,7 @@ func _camera_kick(strength: float = 4.0) -> void:
 
 func _emit_hud() -> void:
 	squadron_changed.emit(planes_remaining)
+	_emit_decoys()
 	if keep:
 		keep_hp_changed.emit(keep.hp, keep.max_hp)
 	level_changed.emit(current_level)
@@ -915,6 +1034,7 @@ func _activate_level(level: int, pan: bool) -> void:
 	squadron_size = GameConfig.squadron_for_level(current_level)
 	planes_remaining = squadron_size
 	active_planes = 0
+	_reset_decoys()
 	_reset_siege_stats()
 
 	# Build the following bastion's shell during this siege so the pan lands on a

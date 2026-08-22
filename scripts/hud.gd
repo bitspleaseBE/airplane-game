@@ -70,6 +70,15 @@ var _wing_brief_queued := false
 var _chrome_faded := false
 var _chrome_tween: Tween
 var _playtest := false
+## Decoy readout, built in code: it is a row of charge pips plus an arm button,
+## and keeping the widget next to the signal it renders is what stops the two
+## drifting apart.
+var _decoy_button: Button
+var _decoy_pips: Array[Panel] = []
+var _decoy_charges := 0
+var _decoy_fill := 0.0
+var _decoy_armed := false
+var _decoy_arm_tween: Tween
 var _force_wing_briefing := false
 
 @onready var squadron_label: Label = $Root/TopBar/SquadronRow/SquadronLabel
@@ -114,6 +123,9 @@ func _ready() -> void:
 
 func setup(main_ref: Node2D) -> void:
 	_main = main_ref
+	_build_decoy_readout()
+	if _main.has_signal("decoys_changed"):
+		_main.decoys_changed.connect(_on_decoys)
 	_main.squadron_changed.connect(_on_squadron)
 	_main.keep_hp_changed.connect(_on_keep_hp)
 	_main.game_won.connect(_on_won)
@@ -594,6 +606,106 @@ func _on_new_game() -> void:
 	hint_label.visible = true
 	if _main and _main.has_method("restart_campaign"):
 		_main.restart_campaign()
+
+
+## --- decoy readout -------------------------------------------------------
+
+
+func _build_decoy_readout() -> void:
+	var bar := $Root/TopBar as HBoxContainer
+	if bar == null or _decoy_button != null:
+		return
+
+	var group := VBoxContainer.new()
+	group.name = "DecoyGroup"
+	group.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	group.add_theme_constant_override("separation", 3)
+
+	var pips := HBoxContainer.new()
+	pips.alignment = BoxContainer.ALIGNMENT_CENTER
+	pips.add_theme_constant_override("separation", 3)
+	for i in GameConfig.DECOY_MAX_CHARGES:
+		var pip := Panel.new()
+		pip.custom_minimum_size = Vector2(12, 5)
+		pip.add_theme_stylebox_override("panel", _pip_style(false))
+		pips.add_child(pip)
+		_decoy_pips.append(pip)
+	group.add_child(pips)
+
+	_decoy_button = Button.new()
+	_decoy_button.text = "FEINT"
+	_decoy_button.custom_minimum_size = Vector2(76, 40)
+	_decoy_button.focus_mode = Control.FOCUS_NONE
+	_decoy_button.add_theme_font_size_override("font_size", 15)
+	_decoy_button.tooltip_text = "Send a decoy drone (Q) — pulls the guns off your next run"
+	_decoy_button.pressed.connect(_on_decoy_pressed)
+	group.add_child(_decoy_button)
+
+	# Left of the sound button, so the two things you press sit together.
+	bar.add_child(group)
+	bar.move_child(group, maxi(bar.get_child_count() - 2, 0))
+	_refresh_decoy_look()
+
+
+func _on_decoy_pressed() -> void:
+	if _main and _main.has_method("toggle_decoy_arm"):
+		_main.toggle_decoy_arm()
+
+
+func _on_decoys(charges: int, _max_charges: int, recharge_t: float) -> void:
+	var armed: bool = bool(_main.decoy_armed) if _main and "decoy_armed" in _main else false
+	if charges == _decoy_charges and armed == _decoy_armed and is_equal_approx(
+		recharge_t, _decoy_fill
+	):
+		return
+	_decoy_charges = charges
+	_decoy_fill = recharge_t
+	if armed != _decoy_armed:
+		_decoy_armed = armed
+		_pulse_decoy_arm()
+	_refresh_decoy_look()
+
+
+func _refresh_decoy_look() -> void:
+	if _decoy_button == null:
+		return
+	var usable := _decoy_charges > 0
+	_decoy_button.disabled = not usable
+	_decoy_button.text = "FEINT" if not _decoy_armed else "TAP WATER"
+	_decoy_button.modulate = Color(1, 1, 1, 1.0 if usable else 0.45)
+	for i in _decoy_pips.size():
+		var filled := i < _decoy_charges
+		_decoy_pips[i].add_theme_stylebox_override("panel", _pip_style(filled))
+		# The next pip along doubles as the recharge bar.
+		if not filled and i == _decoy_charges:
+			_decoy_pips[i].modulate = Color(1, 1, 1, 0.3 + _decoy_fill * 0.7)
+		else:
+			_decoy_pips[i].modulate = Color(1, 1, 1, 1)
+
+
+func _pip_style(filled: bool) -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = (
+		Color(1.0, 0.86, 0.42, 0.95) if filled else Color(0.85, 0.88, 0.85, 0.22)
+	)
+	sb.set_corner_radius_all(3)
+	return sb
+
+
+## Armed is a mode, and a mode the player forgot they set is the worst kind —
+## so the button breathes while it is on.
+func _pulse_decoy_arm() -> void:
+	if _decoy_arm_tween and _decoy_arm_tween.is_valid():
+		_decoy_arm_tween.kill()
+	if _decoy_button == null:
+		return
+	_decoy_button.scale = Vector2.ONE
+	if not _decoy_armed:
+		return
+	_decoy_button.pivot_offset = _decoy_button.size * 0.5
+	_decoy_arm_tween = create_tween().set_loops()
+	_decoy_arm_tween.tween_property(_decoy_button, "scale", Vector2(1.08, 1.08), 0.32)
+	_decoy_arm_tween.tween_property(_decoy_button, "scale", Vector2.ONE, 0.32)
 
 
 func _on_sound_toggled() -> void:
