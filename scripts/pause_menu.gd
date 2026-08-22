@@ -31,6 +31,13 @@ var _options_first_focus: Control
 
 var _quit_confirm := false
 var _quit_button: Button
+## Re-read hooks, one per options row. The page is built once, but Settings can
+## move underneath it — F11, M, or another session's saved file — so every row
+## has to be able to pull its current value back out rather than trusting the
+## snapshot it was constructed with. Without this the first click on a stale
+## toggle sends the value already in effect, which no-ops, and the control reads
+## as broken until you click it twice.
+var _refreshers: Array[Callable] = []
 
 
 func _ready() -> void:
@@ -58,6 +65,7 @@ func toggle() -> void:
 func open() -> void:
 	if visible:
 		return
+	refresh_options()
 	_show_page(Page.ROOT)
 	visible = true
 	# Only claim the pause flag if something else has not already set it —
@@ -85,10 +93,31 @@ func close() -> void:
 func show_options() -> void:
 	if not visible:
 		open()
+	refresh_options()
 	_show_page(Page.OPTIONS)
 
 
+func refresh_options() -> void:
+	for r in _refreshers:
+		r.call()
+
+
 func _unhandled_input(event: InputEvent) -> void:
+	# These live here rather than in main.gd because this layer is
+	# PROCESS_MODE_ALWAYS: handled in the pausable level scene, they silently
+	# stopped working exactly while the pause menu was open, which is the moment
+	# a player is most likely to reach for them.
+	if event.is_action_pressed("toggle_fullscreen"):
+		Settings.toggle_fullscreen()
+		refresh_options()
+		get_viewport().set_input_as_handled()
+		return
+	if event.is_action_pressed("toggle_mute"):
+		Settings.toggle_muted()
+		refresh_options()
+		get_viewport().set_input_as_handled()
+		return
+
 	if event.is_action_pressed("pause"):
 		if visible and _page == Page.OPTIONS:
 			_show_page(Page.ROOT)
@@ -173,25 +202,53 @@ func _build_options_page() -> VBoxContainer:
 
 	page.add_child(_section_label("AUDIO"))
 	_options_first_focus = _add_slider(
-		page, "Master", Settings.master_volume, Settings.set_master_volume
+		page,
+		"Master",
+		func() -> float: return Settings.master_volume,
+		Settings.set_master_volume
 	)
-	_add_slider(page, "Effects", Settings.sfx_volume, Settings.set_sfx_volume)
-	_add_slider(page, "Music", Settings.music_volume, Settings.set_music_volume)
-	_add_slider(page, "Ambience", Settings.ambience_volume, Settings.set_ambience_volume)
-	_add_check(page, "Mute all", Settings.muted, Settings.set_muted)
+	_add_slider(
+		page, "Effects", func() -> float: return Settings.sfx_volume, Settings.set_sfx_volume
+	)
+	_add_slider(
+		page, "Music", func() -> float: return Settings.music_volume, Settings.set_music_volume
+	)
+	_add_slider(
+		page,
+		"Ambience",
+		func() -> float: return Settings.ambience_volume,
+		Settings.set_ambience_volume
+	)
+	_add_check(page, "Mute all", func() -> bool: return Settings.muted, Settings.set_muted)
 
-	page.add_child(_section_label("VIDEO"))
-	_add_check(page, "Fullscreen", Settings.fullscreen, Settings.set_fullscreen)
-	_add_check(page, "V-Sync", Settings.vsync, Settings.set_vsync)
+	# Web refuses a fullscreen request made outside a user gesture and has no
+	# v-sync control at all; phones are always fullscreen. Offering dead
+	# switches is worse than offering none.
+	if Settings.can_manage_window():
+		page.add_child(_section_label("VIDEO"))
+		_add_check(
+			page, "Fullscreen", func() -> bool: return Settings.fullscreen, Settings.set_fullscreen
+		)
+		_add_check(page, "V-Sync", func() -> bool: return Settings.vsync, Settings.set_vsync)
 
 	page.add_child(_section_label("ACCESSIBILITY"))
-	_add_slider(page, "Screen shake", Settings.screen_shake, Settings.set_screen_shake)
-	_add_check(page, "Reduced motion", Settings.reduced_motion, Settings.set_reduced_motion)
+	_add_slider(
+		page,
+		"Screen shake",
+		func() -> float: return Settings.screen_shake,
+		Settings.set_screen_shake
+	)
+	_add_check(
+		page,
+		"Reduced motion",
+		func() -> bool: return Settings.reduced_motion,
+		Settings.set_reduced_motion
+	)
 	_add_option(
 		page,
 		"Colourblind",
 		Settings.COLORBLIND_NAMES,
-		int(Settings.colorblind_mode),
+		func() -> int: return int(Settings.colorblind_mode),
 		Settings.set_colorblind_mode
 	)
 
@@ -215,8 +272,9 @@ func _show_page(page: Page) -> void:
 ## --- rows ----------------------------------------------------------------
 
 
-func _add_slider(parent: Node, label: String, value: float, setter: Callable) -> Control:
+func _add_slider(parent: Node, label: String, getter: Callable, setter: Callable) -> Control:
 	var row := _make_row(label)
+	var value: float = getter.call()
 	var slider := HSlider.new()
 	slider.min_value = 0.0
 	slider.max_value = 1.0
@@ -237,33 +295,45 @@ func _add_slider(parent: Node, label: String, value: float, setter: Callable) ->
 	row.add_child(slider)
 	row.add_child(readout)
 	parent.add_child(row)
+	_refreshers.append(
+		func() -> void:
+			var v: float = getter.call()
+			slider.set_value_no_signal(v)
+			readout.text = "%d%%" % roundi(v * 100.0)
+	)
 	return slider
 
 
-func _add_check(parent: Node, label: String, value: bool, setter: Callable) -> Control:
+func _add_check(parent: Node, label: String, getter: Callable, setter: Callable) -> Control:
 	var row := _make_row(label)
 	var check := CheckButton.new()
-	check.button_pressed = value
+	check.button_pressed = bool(getter.call())
 	check.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	check.toggled.connect(func(on: bool) -> void: setter.call(on))
 	row.add_child(check)
 	parent.add_child(row)
+	_refreshers.append(
+		func() -> void: check.set_pressed_no_signal(bool(getter.call()))
+	)
 	return check
 
 
 func _add_option(
-	parent: Node, label: String, choices: Array, selected: int, setter: Callable
+	parent: Node, label: String, choices: Array, getter: Callable, setter: Callable
 ) -> Control:
 	var row := _make_row(label)
 	var box := OptionButton.new()
 	for i in choices.size():
 		box.add_item(str(choices[i]), i)
-	box.selected = clampi(selected, 0, maxi(choices.size() - 1, 0))
+	box.selected = clampi(int(getter.call()), 0, maxi(choices.size() - 1, 0))
 	box.custom_minimum_size = Vector2(200, ROW_HEIGHT * 0.8)
 	box.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	box.item_selected.connect(func(i: int) -> void: setter.call(i))
 	row.add_child(box)
 	parent.add_child(row)
+	_refreshers.append(
+		func() -> void: box.selected = clampi(int(getter.call()), 0, maxi(choices.size() - 1, 0))
+	)
 	return box
 
 

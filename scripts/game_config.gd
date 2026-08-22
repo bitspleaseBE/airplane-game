@@ -149,14 +149,16 @@ const FLAK_BURST_RADIUS := 60.0
 ## third of its squadron, losses never bite and no placement decision can show
 ## up in the result.
 ##
-## The strike band is the tightest of the four because strike jets are the most
-## efficient wing measured: they release from standoff and bank away, so ~two
-## thirds of them deliver, against ~a third for the wings that have to overfly.
+## The late bands are the largest because scaling the fort with its island moved
+## the guns out to a real defensive ring, and delivery on the big strongholds
+## fell with it: at the previous sizes adaptive play spent its whole wing on the
+## finale three seeds out of three and still left the keep standing. These are
+## the sizes that put good play back at roughly two thirds.
 const SQUADRON_BY_WING := {
 	PlaneType.GUNSHIP: Vector2i(44, 4),  # levels 1–5   → 44..60
 	PlaneType.BOMBER: Vector2i(46, 3),   # levels 6–10  → 46..58
-	PlaneType.STRIKE: Vector2i(46, 2),   # levels 11–15 → 46..54
-	PlaneType.CARPET: Vector2i(36, 1),   # levels 16–20 → 36..40
+	PlaneType.STRIKE: Vector2i(56, 5),   # levels 11–15 → 56..76
+	PlaneType.CARPET: Vector2i(62, 5),   # levels 16–20 → 62..82
 }
 const SQUADRON_BASE := 44
 ## Alias for level-1 squadron (playtest / HUD defaults).
@@ -235,13 +237,13 @@ const TURRET_WATER_REACH := 105.0
 const TURRET_RANGE_CAP := 560.0
 ## Extra reach the milestone strongholds hold beyond the normal curve.
 ##
-## Measured need, not flavour. Sector slew punishes *sustained* pressure, but it
-## can only do that if a bird spends long enough under fire for the mounts to
-## walk across its lane. On the 460-radius finale the contested band was so thin
-## that a carpet bird crossed it in about a second — shorter than a single gun's
-## target lock — so a locked bearing was no worse than an adaptive one and the
-## campaign's load-bearing rule failed on its own last level. Widening the band
-## is what gives slew time to bite.
+## Kept after testing its removal. The theory was that this was only ever a
+## workaround for mounts that did not scale with their island, and that with the
+## fort scaled it would blanket every bearing and erase the cold water the tactic
+## reads. Measured, removing it was clearly worse: a locked bearing went from
+## losing 2 of 2 at bastion 15 to winning, and the finale got softer still. The
+## strongholds need both — a real gun ring *and* the reach to hold the water
+## outside it.
 const TURRET_STRONGHOLD_REACH := 120.0
 const TURRET_ROTATE_SPEED := 3.5
 ## How fast a barrel swings, rad/s. Deliberately slower than a plane's run: a

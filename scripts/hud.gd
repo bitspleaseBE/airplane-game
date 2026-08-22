@@ -117,7 +117,7 @@ func _ready() -> void:
 		_sound_on = false
 		_refresh_sound_button()
 		return
-	_sound_on = _load_sound_enabled()
+	Settings.audio_changed.connect(_apply_sound)
 	_apply_sound()
 
 
@@ -586,24 +586,25 @@ func _stop_stars_tween() -> void:
 			icon.scale = Vector2.ONE
 
 
-func _on_restart() -> void:
+## Hides the result modal and stops its ambiance. Public because restarts can
+## now come from the pause menu and the R hotkey as well as this modal.
+func dismiss_result_overlay() -> void:
 	_stop_overlay_ambiance()
 	_stop_stars_tween()
 	overlay.visible = false
 	stars_row.visible = false
 	new_game_button.visible = false
 	hint_label.visible = true
+
+
+func _on_restart() -> void:
+	dismiss_result_overlay()
 	if _main:
 		_main.advance_or_restart()
 
 
 func _on_new_game() -> void:
-	_stop_overlay_ambiance()
-	_stop_stars_tween()
-	overlay.visible = false
-	stars_row.visible = false
-	new_game_button.visible = false
-	hint_label.visible = true
+	dismiss_result_overlay()
 	if _main and _main.has_method("restart_campaign"):
 		_main.restart_campaign()
 
@@ -708,14 +709,18 @@ func _pulse_decoy_arm() -> void:
 	_decoy_arm_tween.tween_property(_decoy_button, "scale", Vector2.ONE, 0.32)
 
 
+## The speaker button is a view onto Settings, not a second owner of the mixer.
+## It used to drive bus 0 and the audio/enabled key directly, which meant the M
+## hotkey and the options sliders each moved state this button could not see:
+## muting with M left the icon reading "Sound on", and dragging Master to 0%
+## silenced the game while a later click here unmuted it at the *old* dB, so 0%
+## master played at full volume.
 func _on_sound_toggled() -> void:
-	_sound_on = not _sound_on
-	_apply_sound()
-	_save_sound_enabled(_sound_on)
+	Settings.toggle_muted()
 
 
 func _apply_sound() -> void:
-	AudioServer.set_bus_mute(0, not _sound_on)
+	_sound_on = not Settings.muted
 	_refresh_sound_button()
 
 
@@ -724,20 +729,6 @@ func _refresh_sound_button() -> void:
 	sound_button.text = ""
 	sound_button.modulate = Color(1, 1, 1, 1.0)
 	sound_button.tooltip_text = "Sound on" if _sound_on else "Sound off"
-
-
-func _load_sound_enabled() -> bool:
-	var cfg := ConfigFile.new()
-	if cfg.load(SETTINGS_PATH) != OK:
-		return true
-	return bool(cfg.get_value("audio", "enabled", true))
-
-
-func _save_sound_enabled(enabled: bool) -> void:
-	var cfg := ConfigFile.new()
-	cfg.load(SETTINGS_PATH)
-	cfg.set_value("audio", "enabled", enabled)
-	cfg.save(SETTINGS_PATH)
 
 
 func _load_briefing_seen() -> bool:

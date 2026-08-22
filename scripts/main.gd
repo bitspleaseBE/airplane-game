@@ -298,7 +298,12 @@ func is_playing() -> bool:
 	return state == State.PLAYING
 
 
+## Called by the result modal's action button. Guard the PLAYING case: if the
+## siege has already been restarted underneath the modal, "next bastion" would
+## otherwise just hide the overlay and spend a banked win for nothing.
 func advance_or_restart() -> void:
+	if state == State.PLAYING:
+		return
 	if state == State.LOST:
 		retry_level()
 	elif state == State.WON:
@@ -309,6 +314,14 @@ func advance_or_restart() -> void:
 
 
 func retry_level() -> void:
+	# Every restart path funnels through here — the pause menu, the R hotkey and
+	# the modal's own button — so the overlay teardown belongs here rather than
+	# in the one caller that used to remember it. Without this, restarting from
+	# the pause menu while a win/lose modal is up leaves a mouse_filter=STOP
+	# overlay on top of a live siege: every tap is swallowed and the level is
+	# unplayable, with no way out but a button that eats the level advance.
+	if hud and hud.has_method("dismiss_result_overlay"):
+		hud.dismiss_result_overlay()
 	_clear_combatants()
 	if _active_island:
 		_active_island.reset_for_retry()

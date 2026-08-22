@@ -228,7 +228,7 @@ func set_vsync(on: bool) -> void:
 
 
 func apply_video() -> void:
-	if _headless or DisplayServer.get_name() == "headless":
+	if _headless or not _can_manage_window():
 		return
 	# Borderless fullscreen rather than exclusive: alt-tabbing out of an
 	# exclusive-mode GL window on Windows is where "the game froze" reports
@@ -241,6 +241,23 @@ func apply_video() -> void:
 	DisplayServer.window_set_vsync_mode(
 		DisplayServer.VSYNC_ENABLED if vsync else DisplayServer.VSYNC_DISABLED
 	)
+
+
+## Only desktop owns its window. On the web a persisted fullscreen=true would
+## call window_set_mode outside a user gesture, the browser would refuse it, and
+## the game would run windowed while this class still believed it was fullscreen
+## — so the options toggle needed two clicks to do anything. On Android and iOS
+## the app is always fullscreen and this would ask for WINDOWED every launch.
+## V-Sync is unimplemented on web and warn-prints on every call.
+func _can_manage_window() -> bool:
+	if DisplayServer.get_name() == "headless":
+		return false
+	return OS.has_feature("pc")
+
+
+## True when the options menu should offer window controls at all.
+func can_manage_window() -> bool:
+	return _can_manage_window()
 
 
 ## --- accessibility -------------------------------------------------------

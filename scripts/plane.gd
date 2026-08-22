@@ -53,6 +53,7 @@ var _hits_left: int = 1
 var _decoy_life: float = 0.0
 var _orbit_radius: float = 0.0
 var _orbit_spin: float = 1.0
+var _flash_tween: Tween
 
 @onready var sprite: Sprite2D = $Sprite
 @onready var shadow: Sprite2D = $Shadow
@@ -335,14 +336,25 @@ func take_hit() -> void:
 	if _hits_left > 0:
 		# Flash and keep flying. The whole point of a decoy is that it stays on
 		# the gunner's mind for more than one trigger pull.
-		var tw := create_tween()
-		tw.tween_property(self, "modulate", Color(1.6, 1.2, 0.8), 0.05)
-		tw.tween_property(self, "modulate", Color(1, 1, 1), 0.16)
+		_flash_tween = _restart_flash_tween()
 		return
+	# A flash still running would keep writing modulate at full alpha while
+	# _sizzle fades it out, so the wreck would strobe and outstay its welcome.
+	if _flash_tween and _flash_tween.is_valid():
+		_flash_tween.kill()
 	phase = Phase.SIZZLING
 	_spin = randf_range(-6.0, 6.0)
 	collision.set_deferred("disabled", true)
 	modulate = Color(1.0, 0.7, 0.5)
+
+
+func _restart_flash_tween() -> Tween:
+	if _flash_tween and _flash_tween.is_valid():
+		_flash_tween.kill()
+	var tw := create_tween()
+	tw.tween_property(self, "modulate", Color(1.6, 1.2, 0.8), 0.05)
+	tw.tween_property(self, "modulate", Color(1, 1, 1), 0.16)
+	return tw
 
 
 func _sizzle(delta: float) -> void:

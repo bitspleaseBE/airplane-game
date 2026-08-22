@@ -150,7 +150,40 @@ What the retune did buy, and it is not small: taking the finale on a locked
 bearing went from 13 birds of 76 to 38 of 40. The rule still fails, but the
 margin is gone.
 
-### Open: gate 1, and the structural cause
+### Iteration 4 — the structural fix, and where it lands
+
+Scaled the fort with its island (`fort_scale_for_radius`, capped 1.95), so the
+corner mounts sit on a real ring instead of a huddle at the centre. This is the
+change the previous iteration identified and it did most of what was hoped:
+
+- Bastion 15 now behaves: a locked bearing loses 2 of 2, good play spends
+  48-68%, runs 23-32s.
+- Bastion 10 improved: good play 75-84%, locked bearing loses 1 of 2.
+- Every bastion stays winnable, good play spends 48-100% (mostly 52-84%), and
+  runs land in 23-90s — against 21-50% and 12-19s before any of this work.
+- Perf improved rather than regressed: idle p95 33.3 → 29.2 ms, combat
+  43.2 → 36.1 ms.
+
+It also surfaced a shipped bug of its own: the stronghold grass lerp pulls the
+grass radius toward a fixed 175, which on a scaled fort lands *inside* the
+fortress and inverted the outer ring's placement band — bastions 10/15/20 built
+with **zero outer guns**. Caught by screenshotting the finale rather than
+trusting a clean compile.
+
+Two experiments were tried and reverted, both recorded in the code so nobody
+repeats them: trimming bomber speed to 1.22 (worse and noisier), and removing
+the stronghold reach bonus on the theory that the scaled ring made it redundant
+(clearly worse — it flipped bastion 15 from pass to fail).
+
+**Still open: the finale.** A locked bearing still wins bastion 20, though it
+now pays 70-96% of the wing to do it against 13 birds of 76 before. Nine
+measured rounds of squadron size, keep HP, emplacement HP, ring density, slew
+speed and span, AA reach, carpet release and the ring geometry have not
+separated it: at bastion 20 adaptive and fixed-bearing play cost within ~10% of
+each other, so no threshold can tell them apart. The discrimination has to come
+from a mechanic rather than a number — the decoy layer is the model to follow.
+
+### Superseded: gate 1, and the structural cause
 
 `island.gd::_place_turrets` seats all four corner guns at a fixed
 `FORT_CLEAR_RADIUS * 0.95` (~105 px) from the island centre whatever the

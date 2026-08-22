@@ -38,6 +38,14 @@ panel (built in code, so a screenshot is the only layout regression test),
 and `--reticle` drives the keyboard aim path so the crosshair appears in the
 frames.
 
+`--modal-restart` is a pass/fail regression check, not a capture: it wins a
+bastion, waits the result modal out, then restarts from the pause menu and
+asserts the siege is actually playable afterwards. It prints
+`MODAL_RESTART_CHECK pass|fail` and exits non-zero on failure. It exists because
+that combination shipped broken — the modal stayed up over a live siege with
+`mouse_filter=STOP`, so every tap was swallowed and the only button available
+ate the level advance.
+
 `--seed=N` is now authoritative: the level scene used to call `randomize()`
 after the harness seeded, so every "seeded" balance result was really
 run-to-run noise. Same seed, same outcome.
@@ -150,7 +158,7 @@ Orientation is locked to portrait in the preset.
 - Deploy rate: one bird per scramble gap (0.5–1.0 s by wing) for taps *and* holds — the only resource clock in the game
 - Squadron: sized per wing from the measured rendered matrix so a well-flown
   siege spends about two thirds of the wing — gunship 44→60, bomber 46→58,
-  strike 46→54, carpet 36→40. The strike band is tightest because strike jets
+  strike 56→76, carpet 62→82. The strike band is tightest because strike jets
   are the most efficient wing measured (they release from standoff and bank
   away, so ~two thirds deliver, against ~a third for the wings that overfly).
   The previous numbers were 3–4× oversized: good play cleared the bastion 10
@@ -173,16 +181,19 @@ Orientation is locked to portrait in the preset.
 - Stronghold arsenal: machine guns from level 1, missile launchers from 4, flak airbursts from 13 (downs every plane within 60 px of the burst)
 - Difficulty is staggered one step at a time: third corner gun at 3, missile launcher at 4, faster gun cycle at 5
 - Defense pads are color-coded: red = keep AA, green = MG, amber = missile, crimson = flak
-- **Known gap — a fixed bearing still wins about one run in three.** Measured
-  across 4 bastions x 3 seeds: adaptive play (`flank`) wins 12/12, spending
-  53-92% of the wing, so every bastion is comfortably winnable. But `column`
-  still wins 1 of 3 runs at *every* level tested (5, 10, 15, 20), including all
-  three milestone strongholds where it must never win. The uniformity is the
-  clue: this is not per-level tuning, it is that some bearings on some layouts
-  are permanently soft, and `column` picks from the coldest seven bearings at
-  random — so roughly a third of the time it finds one. What the retune did buy
-  is cost: taking the finale on a locked bearing went from 13 birds of 76 to 38
-  of 40. The margin is gone even where the rule still fails
+- **Known gap — a fixed bearing still wins the finale.** Current measured state
+  (rendered, 2-3 seeds per cell): every bastion is winnable, adaptive play
+  (`flank`) spends 48-100% of its wing (mostly 52-84%), and wins land in 23-90s.
+  A locked bearing (`column`) now loses 2 of 2 at bastion 15 and 1 of 2 at
+  bastion 10, but still wins bastion 20, where it must never win — and it spends
+  70-96% of the wing doing it, against 13 birds of 76 before any of this work.
+  The finale resists every lever tried across nine measured rounds: squadron
+  size, keep HP, emplacement HP, ring density, slew speed and span, AA reach,
+  the carpet release point, and the gun-ring geometry itself. What is left is
+  that at bastion 20 adaptive and fixed-bearing play cost within ~10% of each
+  other, so no threshold separates them; the discrimination has to come from a
+  mechanic, not a number. Worth noting the reach bonus above is load-bearing
+  here: removing it flipped bastion 15 from a clean pass to a fail
 - **Known gap — stronghold gun placement, probably the same bug.** `island.gd::_place_turrets` seats all
   four corner guns at a fixed ~105 px from the island centre
   (`FORT_CLEAR_RADIUS * 0.95`) whatever the island's size, because they sit on

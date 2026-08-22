@@ -45,6 +45,10 @@ var _force_campaign_win := false
 ## code, so a screenshot is the only thing that catches a layout regression.
 var _show_pause := ""
 var _show_reticle := false
+## Regression check for a shipped bug: restarting from the pause menu while a
+## result modal was open left the modal on screen over a live siege with
+## mouse_filter=STOP, so every tap was swallowed and the level was unplayable.
+var _check_modal_restart := false
 var _squadron_cap := -1
 var _perf := false
 var _ocean_mode := ""  # "" (normal) | "flat" | "off"
@@ -129,6 +133,10 @@ func _ready() -> void:
 			_duration = minf(_duration, 4.0)
 		elif arg == "--reticle":
 			_show_reticle = true
+		elif arg == "--modal-restart":
+			_check_modal_restart = true
+			_planes_to_spawn = 0
+			_duration = minf(_duration, 8.0)
 		elif arg == "--perf":
 			_perf = true
 		elif arg.begins_with("--ocean="):
@@ -245,6 +253,10 @@ func _run() -> void:
 		Input.action_release("cursor_right")
 		await get_tree().process_frame
 
+	if _check_modal_restart:
+		await _run_modal_restart_check()
+		return
+
 	if not _show_pause.is_empty():
 		var menu := _main.get_node_or_null("PauseMenu")
 		if menu and menu.has_method("open"):
@@ -330,10 +342,60 @@ func _run() -> void:
 	get_tree().quit(0)
 
 
+## Win the level, let the modal settle, then restart from the pause menu and
+## assert the siege is actually playable afterwards. Prints MODAL_RESTART_CHECK
+## with pass/fail so a caller can gate on it.
+func _run_modal_restart_check() -> void:
+	var hud := _main.get_node_or_null("HUD")
+	var menu := _main.get_node_or_null("PauseMenu")
+	if hud == null or menu == null:
+		print("MODAL_RESTART_CHECK fail reason=missing-nodes")
+		_result = "modal-restart-fail"
+		_write_summary()
+		get_tree().quit(1)
+		return
+
+	_main._set_won()
+	# Stars flip one at a time; wait the modal out so this exercises the real
+	# state a player would hit, not a half-built overlay.
+	await get_tree().create_timer(2.6).timeout
+	var overlay_after_win: bool = hud.overlay.visible
+
+	menu.open()
+	await get_tree().create_timer(0.25).timeout
+	menu._on_restart_level()
+	await get_tree().create_timer(0.6).timeout
+
+	var overlay_still_up: bool = hud.overlay.visible
+	var playing: bool = _main.state == _main.State.PLAYING
+	var unpaused := not get_tree().paused
+	var ok := overlay_after_win and not overlay_still_up and playing and unpaused
+	print(
+		(
+			"MODAL_RESTART_CHECK %s modal_shown=%s modal_cleared=%s playing=%s unpaused=%s"
+			% [
+				"pass" if ok else "fail",
+				overlay_after_win,
+				not overlay_still_up,
+				playing,
+				unpaused,
+			]
+		)
+	)
+	await _screenshot("modal-restart")
+	_result = "modal-restart-pass" if ok else "modal-restart-fail"
+	_write_summary()
+	get_tree().quit(0 if ok else 1)
+
+
 ## True when the column has flown far enough since the last feint and a charge
 ## is actually available.
 func _should_feint() -> bool:
 	if _deployed <= 0 or _deployed >= _planes_to_spawn:
+		return false
+	# A feint is refused once the wing is spent, so without this the loop would
+	# sit here re-arming a charge it can never use for the rest of the run.
+	if "planes_remaining" in _main and _main.planes_remaining <= 0:
 		return false
 	if not ("decoy_charges" in _main) or _main.decoy_charges <= 0:
 		return false
@@ -622,7 +684,7 @@ func _write_summary() -> void:
 		"level": _level,
 		"seed": _rng_seed,
 		"elapsed_s": snappedf(_elapsed(), 0.1),
-		"keep_hp": _main.keep.hp if is_instance_valid(_main) and "keep" in _main else -1,
+		"keep_hp": _main.keep.hp if is_instance_valid(_main) and _main.keep != null else -1,
 		"planes_remaining": _main.planes_remaining if is_instance_valid(_main) and "planes_remaining" in _main else -1,
 		"planes_deployed": _deployed,
 		"taps_via_input": _input_taps,
