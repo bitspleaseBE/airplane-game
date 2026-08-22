@@ -31,7 +31,13 @@ const TRACK_SLACK := 0.12
 ## so the best play becomes "find the hole once, then feed the whole squadron
 ## through it in a straight line", which is exactly what the campaign is meant
 ## to refuse. A lane you lean on closes, and you have to keep moving.
-const SECTOR_SLEW_SPEED := 0.5
+## Raised from 0.5 on measurement. With the squadron and the ring both retuned,
+## a locked-bearing column still took the milestone strongholds — it needed more
+## birds than adaptive flanking did, which is the right ordering, but "more
+## expensive" is not the rule. The rule is that a fixed heading must not win, and
+## slew is the only mechanism that punishes *sustained* pressure specifically
+## rather than punishing every attack equally.
+const SECTOR_SLEW_SPEED := 0.8
 const SECTOR_RECENTRE_SPEED := 0.16
 ## How far off its corner a mount may be pulled. Wide enough that the two guns
 ## flanking an empty corner mount can between them close the 90° hole it leaves
@@ -39,7 +45,7 @@ const SECTOR_RECENTRE_SPEED := 0.16
 ## shut, and feeding the squadron down it in a straight line simply wins.
 ## Still bounded, so a feint cannot drag the whole fort to one side and strip
 ## the rest of the island bare.
-const SECTOR_HOME_SPAN := 1.0  # ~57°
+const SECTOR_HOME_SPAN := 1.2  # ~69°
 ## Gunners under-lead a little and scatter a little. Perfect prediction turned
 ## the slower airframes into free kills — the sector should be dangerous, not
 ## deterministic, or there is no point flying through one under any plan.

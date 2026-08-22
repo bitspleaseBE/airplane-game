@@ -54,6 +54,10 @@ const STRIKE_MISSILE_TURN_RATE := 4.5
 const STRIKE_SPEED_MULT := 1.15
 
 ## Bomber (levels 6–10): must overfly the keep — needs pace to punch through AA.
+## Trimming this to 1.22 was tried, on the theory that a bomber crossing the
+## contested band faster than a gun's target-lock window is what lets a repeated
+## bearing go unpunished. It measured worse and noisier at the bomber
+## stronghold, so it is left alone.
 const BOMBER_SPEED_MULT := 1.35
 
 ## Carpet bomber (levels 16–20): one plane lays 3 bombs along the keep track.
@@ -67,7 +71,14 @@ const CARPET_BOMB_SPACING := 36.0
 ## stronghold a 170 start meant crossing ~330 px of covered water first, on a
 ## locked heading, which is the one thing a leading gunner solves perfectly.
 ## The wing was losing whole squadrons without the keep taking a scratch.
-const CARPET_START_RANGE := 265.0
+##
+## Pulled back from 265 once the keep and the squadron were retuned. At 265 the
+## bird committed its payload before it ever reached the deep fort, so a carpet
+## run barely had to survive anything — measured, a locked-bearing column landed
+## 53% of its sticks on the finale and beat adaptive flanking. The 265 figure was
+## calibrated against a keep with a fifth of its current HP and a squadron the
+## wing could afford to throw away.
+const CARPET_START_RANGE := 205.0
 ## Carpet bombers overfly the whole fort on a locked heading, which makes them
 ## the easiest airframe for a leading gunner to solve. They need the pace to
 ## survive the run they are forced to make.
@@ -131,13 +142,23 @@ const FLAK_BURST_RADIUS := 60.0
 ## with roughly a third of the wing spare while a sloppy one runs dry — which
 ## is what makes an individual deploy worth thinking about.
 ## Vector2i(size at the wing's first level, growth per level within the band).
+## Sized from the measured rendered matrix so a well-flown siege spends about
+## two thirds of the wing. The old numbers were 3–4x oversized: `flank` cleared
+## the bastion 10 stronghold on 12 birds of 54 and the finale on 16 of 76, which
+## is the failure the design-gates skill names outright — if a level falls to a
+## third of its squadron, losses never bite and no placement decision can show
+## up in the result.
+##
+## The strike band is the tightest of the four because strike jets are the most
+## efficient wing measured: they release from standoff and bank away, so ~two
+## thirds of them deliver, against ~a third for the wings that have to overfly.
 const SQUADRON_BY_WING := {
-	PlaneType.GUNSHIP: Vector2i(36, 3),  # levels 1–5   → 36..48
-	PlaneType.BOMBER: Vector2i(38, 4),   # levels 6–10  → 38..54
-	PlaneType.STRIKE: Vector2i(42, 3),   # levels 11–15 → 42..54
-	PlaneType.CARPET: Vector2i(56, 5),   # levels 16–20 → 56..76
+	PlaneType.GUNSHIP: Vector2i(44, 4),  # levels 1–5   → 44..60
+	PlaneType.BOMBER: Vector2i(46, 3),   # levels 6–10  → 46..58
+	PlaneType.STRIKE: Vector2i(46, 2),   # levels 11–15 → 46..54
+	PlaneType.CARPET: Vector2i(36, 1),   # levels 16–20 → 36..40
 }
-const SQUADRON_BASE := 36
+const SQUADRON_BASE := 44
 ## Alias for level-1 squadron (playtest / HUD defaults).
 const SQUADRON_SIZE := SQUADRON_BASE
 
@@ -148,10 +169,23 @@ const SQUADRON_SIZE := SQUADRON_BASE
 const THREE_STAR_FRACTION := 0.55
 const TWO_STAR_FRACTION := 0.8
 
-const KEEP_MAX_HP := 100
-const KEEP_HP_PER_LEVEL := 4  # level 20 → 100 + 76 = 176
+## Keep HP had not kept pace with the wings. Payload per bird roughly triples
+## across the campaign (a gunship puts ~5 on the keep, a carpet stick puts ~11)
+## while the keep only went 100 → 176, so every later bastion was cheaper in
+## ordnance than the one before it. Measured against the rendered matrix, this
+## curve is what makes a good siege spend most of its wing and run 30s+ rather
+## than resolving in twelve seconds.
+const KEEP_MAX_HP := 170
+const KEEP_HP_PER_LEVEL := 17  # level 20 → 170 + 323 = 493
 const KEEP_BOMB_DAMAGE := 20
-const TURRET_MAX_HP := 40
+## Emplacements have to be worth more than two bombs, or a longer siege simply
+## suppresses the whole ring early and flies the back half unopposed — which
+## would hand a fixed bearing the win by attrition instead of by placement.
+## Three bombs is the measured sweet spot: 85 was tried first and made the
+## bomber strongholds unwinnable, because bombs incidentally clearing the ring
+## is most of what keeps delivery viable over a long siege — at five bombs a gun
+## the ring never thinned and delivery collapsed from 42% to 15%.
+const TURRET_MAX_HP := 60
 const TURRET_BOMB_DAMAGE := 20
 
 const PLANE_SPEED := 220.0
@@ -191,7 +225,24 @@ const TURRET_WATER_REACH := 105.0
 ## Ceiling on that growth. Without it the late strongholds reach clear across
 ## the screen, which both erases the cold water the tactic depends on and makes
 ## the deep run a carpet wing has to fly simply unsurvivable.
-const TURRET_RANGE_CAP := 470.0
+##
+## Raised from 470 on measurement: at 470 the finale was not contested at all —
+## a locked-bearing column beat adaptive flanking there (29 birds against 43),
+## which is the exact opposite of the campaign's load-bearing rule. On a 460
+## island the mounts sit close enough to the middle that a 470 reach left the
+## approach water outside everyone's envelope, so no amount of sector slew could
+## answer a fixed heading.
+const TURRET_RANGE_CAP := 560.0
+## Extra reach the milestone strongholds hold beyond the normal curve.
+##
+## Measured need, not flavour. Sector slew punishes *sustained* pressure, but it
+## can only do that if a bird spends long enough under fire for the mounts to
+## walk across its lane. On the 460-radius finale the contested band was so thin
+## that a carpet bird crossed it in about a second — shorter than a single gun's
+## target lock — so a locked bearing was no worse than an adaptive one and the
+## campaign's load-bearing rule failed on its own last level. Widening the band
+## is what gives slew time to bite.
+const TURRET_STRONGHOLD_REACH := 120.0
 const TURRET_ROTATE_SPEED := 3.5
 ## How fast a barrel swings, rad/s. Deliberately slower than a plane's run: a
 ## gun facing the wrong way stays wrong for long enough that the player can
@@ -204,7 +255,7 @@ const BULLET_SPEED := 380.0
 const BULLET_DAMAGE := 1
 
 ## Outer defense towers (procedural, smaller than keep AA).
-const TOWER_MAX_HP := 30
+const TOWER_MAX_HP := 45
 const TOWER_BOMB_DAMAGE := 20
 const TOWER_MG_RANGE := 200.0
 const TOWER_MG_COOLDOWN := 0.45
@@ -341,7 +392,11 @@ func tower_count_range_for_level(level: int) -> Vector2i:
 		# through a thin ring whatever direction it comes from; 15 flies the
 		# fragile strike wing and was drowning in guns.
 		if n == 10:
-			return Vector2i(5, 6)
+			# Thickened from (5, 6) so the bomber stronghold answers a fixed
+			# bearing at all. (7, 8) was tried and, stacked with the stronghold
+			# reach bonus, tipped the level to unwinnable — adaptive play spent
+			# the whole wing and left the keep on 23.
+			return Vector2i(6, 7)
 		if n == 15:
 			return Vector2i(4, 5)
 		return Vector2i(6, 7)
@@ -369,7 +424,10 @@ func tower_count_range_for_level(level: int) -> Vector2i:
 func turret_range_for_level(level: int) -> float:
 	var n := clampi(level, 1, LEVEL_COUNT)
 	var base := TURRET_RANGE_HOT if n >= 3 else TURRET_RANGE
-	return clampf(island_radius_for_level(n) + TURRET_WATER_REACH, base, TURRET_RANGE_CAP)
+	var reach := clampf(island_radius_for_level(n) + TURRET_WATER_REACH, base, TURRET_RANGE_CAP)
+	if is_stronghold_level(n):
+		reach += TURRET_STRONGHOLD_REACH
+	return reach
 
 
 func turret_cooldown_for_level(level: int) -> float:

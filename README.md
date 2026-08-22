@@ -22,7 +22,7 @@ Read the water before you tap. Every corner gun owns a sector, drawn on the sea 
 
 Destroy the central keep to win; spend the squadron with the keep still standing and you lose. Beat a bastion to pan to the next of 20 islands.
 
-**Airframes are earned per level band:** gunships (1–5) hunt corner AA then strafe with their nose gun, bombers (6–10) drop one heavy bomb, strike jets (11–15) fire a guided missile from standoff and bank away, carpet bombers (16–20) begin their run 265 px out and lay three bombs along the keep track. The stronghold evolves too — missile batteries from level 4, flak airbursts from 13.
+**Airframes are earned per level band:** gunships (1–5) hunt corner AA then strafe with their nose gun, bombers (6–10) drop one heavy bomb, strike jets (11–15) fire a guided missile from standoff and bank away, carpet bombers (16–20) begin their run 205 px out and lay three bombs along the keep track. The stronghold evolves too — missile batteries from level 4, flak airbursts from 13.
 
 ## Automated playtest
 
@@ -148,16 +148,41 @@ Orientation is locked to portrait in the preset.
 - Levels: 20 procedural islands in one ocean; camera pans between them
 - Framing: the camera zooms out per bastion (0.8 down to ~0.6) so the island plus a ~120 px ring of tappable water always fits across the screen. Not cosmetic — at a fixed zoom the level 15 and 20 islands were wider than the viewport, leaving no water to tap east or west and removing those approach bearings from the game entirely
 - Deploy rate: one bird per scramble gap (0.5–1.0 s by wing) for taps *and* holds — the only resource clock in the game
-- Squadron: sized per wing, from measured good-play runs — gunship 36→48, bomber 38→54, strike 42→54, carpet 56→76
+- Squadron: sized per wing from the measured rendered matrix so a well-flown
+  siege spends about two thirds of the wing — gunship 44→60, bomber 46→58,
+  strike 46→54, carpet 36→40. The strike band is tightest because strike jets
+  are the most efficient wing measured (they release from standoff and bank
+  away, so ~two thirds deliver, against ~a third for the wings that overfly).
+  The previous numbers were 3–4× oversized: good play cleared the bastion 10
+  stronghold on 12 birds of 54 and the finale on 16 of 76, which is exactly the
+  failure the design-gates skill names — if a level falls to a third of its
+  squadron, losses never bite and no placement decision shows up in the result
 - Wings by level band: gunship 1–5 (SEAD — prefer corner AA, 5 strafe shots × 4 dmg), bomber 6–10 (one 20-dmg bomb), strike 11–15 (guided missile, 20 dmg, launched 230 px out — scales with AA reach), carpet 16–20 (3 bombs × 10 dmg along the keep track)
-- Keep HP: 100 + 4×(level−1); corner AA and outer towers scale up
-- Corner AA: each gun covers a ~120° sector centred on its current facing and cannot traverse past it. Four live guns close the ring, three leave a usable gap, two leave the island open. Reach scales with the island (capped at 470) so the contested water stays a real space on the big late strongholds
-- Sectors slew: a mount swings its whole sector toward sustained pressure (up to ~57° off its corner) and drifts back when the sky clears. This is what forces the attack to keep moving — a fixed bearing gets answered and shut
+- Keep HP: 170 + 17×(level−1) → 493 at bastion 20. Payload per bird roughly
+  triples across the campaign (a gunship puts ~5 on the keep, a carpet stick
+  ~11) while the keep used to go only 100→176, so every later bastion was
+  cheaper in ordnance than the one before it
+- Emplacements: corner AA 60 HP, outer towers 45 HP — three bombs and about two
+  respectively. Worth more than two bombs, or a long siege just suppresses the
+  ring early and flies the back half unopposed; much more than that and the ring
+  never thins, which measured a collapse in bomb delivery from 42% to 15%
+- Corner AA: each gun covers a ~120° sector centred on its current facing and cannot traverse past it. Four live guns close the ring, three leave a usable gap, two leave the island open. Reach scales with the island (capped at 560, plus 120 on the milestone strongholds) so the contested water stays a real space on the big late strongholds. The stronghold bonus is a measured need, not flavour: sector slew punishes *sustained* pressure, but only if a bird is under fire long enough for the mounts to walk across its lane, and on the 460-radius finale the contested band was thin enough that a carpet bird crossed it in about a second — shorter than one gun's target lock — so a locked bearing was no worse than an adaptive one
+- Sectors slew: a mount swings its whole sector toward sustained pressure (up to ~69° off its corner) and drifts back when the sky clears. This is what forces the attack to keep moving — a fixed bearing gets answered and shut
 - Corner AA leads its target, commits to it for 1.25 s, and traverses at 1.5 rad/s — slower than a bird's run in, which is what makes baiting work
 - Outer towers traverse freely but reach short: the close-in punish for overflying, not the strategic ring
 - Stronghold arsenal: machine guns from level 1, missile launchers from 4, flak airbursts from 13 (downs every plane within 60 px of the burst)
 - Difficulty is staggered one step at a time: third corner gun at 3, missile launcher at 4, faster gun cycle at 5
 - Defense pads are color-coded: red = keep AA, green = MG, amber = missile, crimson = flak
+- **Known gap — stronghold gun placement.** `island.gd::_place_turrets` seats all
+  four corner guns at a fixed ~105 px from the island centre
+  (`FORT_CLEAR_RADIUS * 0.95`) whatever the island's size, because they sit on
+  the fort sprite's corner towers. On the 240-radius opener that is a real ring;
+  on the 460-radius finale it is a huddle in the middle, ~400 px from the shore
+  it defends. So "four live guns close the ring, three leave a gap" — the stated
+  spine of the tactics — degenerates as islands grow, and the milestone
+  strongholds measure as the *easiest* levels in the campaign. Reach bonuses
+  paper over it; the fix is to scale the fort with the island or decouple the
+  mounts from its art
 - Stars on win: 3 = ≤55% of the squadron, 2 = ≤80%, 1 = more
 - One bullet downs a plane (sizzle-down, no payload)
 
