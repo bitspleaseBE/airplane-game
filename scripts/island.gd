@@ -67,6 +67,12 @@ var _shallow_lobes: Array = []
 var _tower_positions: Array[Vector2] = []
 var _turret_positions: Array[Vector2] = []
 var _grass_min_radius: float = GRASS_MIN_RADIUS_BASE
+## Fort footprint for this island. Every clearance and mount radius below is
+## derived from it, so the fortress and its gun ring stay the same fraction of
+## the isle on bastion 20 as on bastion 1.
+var _fort_scale: float = 1.0
+var _fort_clear: float = GameConfig.FORT_CLEAR_RADIUS
+var _keep_radius: float = GameConfig.KEEP_RADIUS
 var _coast_shape: CoastShape = CoastShape.ROUND
 var _beach: BeachQuad
 var _built := false
@@ -100,12 +106,20 @@ func build(level_num: int, main_ref: Node2D) -> void:
 	var want_towers := GameConfig.tower_count_range_for_level(level).y
 	if want_towers > 0:
 		island_radius = maxf(island_radius, GameConfig.ISLAND_RADIUS)
+	# From this island's own radius rather than the level's nominal one, so a
+	# jittered isle gets a fort that matches the ground it actually sits on.
+	_apply_fort_scale(GameConfig.fort_scale_for_radius(island_radius))
 	_grass_min_radius = lerpf(120.0, 155.0, GameConfig.level_t(level))
-	if want_towers > 0:
-		# Placement band: min_d = fort+30, max_d ≈ grass+20 → grass must clear ~125+.
-		_grass_min_radius = maxf(_grass_min_radius, GameConfig.FORT_CLEAR_RADIUS + 45.0)
 	if GameConfig.is_stronghold_level(level):
 		_grass_min_radius = lerpf(_grass_min_radius, 175.0, 0.7)
+	if want_towers > 0:
+		# The outer ring's placement band is [fort + 30, grass + 20], so the
+		# grass has to clear the fort by more than that or there is no band at
+		# all and the bastion ships with zero outer guns. This floor must be
+		# applied *last*: the stronghold lerp above pulls the grass radius toward
+		# a fixed 175, which on a scaled-up fort lands inside the fortress and
+		# silently emptied the whole outer ring on bastions 10/15/20.
+		_grass_min_radius = maxf(_grass_min_radius, _fort_clear + 45.0)
 	_coast_shape = _coast_shape_for_level(level)
 
 	_clear_children(land)
@@ -303,7 +317,7 @@ func gun_count_initial() -> int:
 
 func apply_bomb_at(pos: Vector2, damage: int) -> void:
 	if keep and is_instance_valid(keep) and keep.hp > 0:
-		if pos.distance_to(keep.global_position) <= GameConfig.PLANE_BOMB_RADIUS + GameConfig.KEEP_RADIUS * 0.35:
+		if pos.distance_to(keep.global_position) <= GameConfig.PLANE_BOMB_RADIUS + _keep_radius * 0.35:
 			keep.take_damage(damage)
 	for turret in turrets_root.get_children():
 		if turret is Turret and is_instance_valid(turret) and not turret.is_destroyed():
@@ -329,7 +343,7 @@ func apply_gunfire_at(pos: Vector2, damage: int) -> void:
 				tower.take_damage(damage)
 				return
 	if keep and is_instance_valid(keep) and keep.hp > 0:
-		if pos.distance_to(keep.global_position) <= GameConfig.KEEP_RADIUS * 0.9:
+		if pos.distance_to(keep.global_position) <= _keep_radius * 0.9:
 			keep.take_damage(damage)
 
 
@@ -397,6 +411,12 @@ func _clear_defenses(_keep_keep: bool) -> void:
 	_turret_positions.clear()
 
 
+func _apply_fort_scale(fort_scale: float) -> void:
+	_fort_scale = fort_scale
+	_fort_clear = GameConfig.FORT_CLEAR_RADIUS * fort_scale
+	_keep_radius = GameConfig.KEEP_RADIUS * fort_scale
+
+
 func _place_keep() -> void:
 	if keep == null:
 		keep = _keep_scene.instantiate()
@@ -406,6 +426,8 @@ func _place_keep() -> void:
 	keep.position = Vector2.ZERO
 	keep.z_index = 1
 	keep.configure(GameConfig.keep_hp_for_level(level))
+	if keep.has_method("configure_scale"):
+		keep.configure_scale(_fort_scale)
 	if not keep.destroyed.is_connected(_on_keep_destroyed):
 		keep.destroyed.connect(_on_keep_destroyed)
 	if not keep.hp_changed.is_connected(_on_keep_hp_changed):
@@ -437,7 +459,10 @@ func _place_turrets() -> void:
 		var tmp: float = corner_angles[i]
 		corner_angles[i] = corner_angles[j]
 		corner_angles[j] = tmp
-	var dist := GameConfig.FORT_CLEAR_RADIUS * 0.95
+	# Scaled with the fort, which is scaled with the island: on a 460 px isle a
+	# fixed 105 px put all four mounts in a huddle at the centre, so the sectors
+	# all radiated from nearly one point and the approach water went uncontested.
+	var dist := _fort_clear * 0.95
 	for i in count:
 		var local := Vector2.from_angle(corner_angles[i]) * dist
 		_turret_positions.append(local)
@@ -449,6 +474,7 @@ func _place_turrets() -> void:
 			get_center(),
 			GameConfig.turret_range_for_level(level),
 			GameConfig.turret_cooldown_for_level(level),
+			_keep_radius,
 		)
 		turret.destroyed.connect(func(pos: Vector2) -> void:
 			if _main and _main.has_method("spawn_gun_kill_flash"):
@@ -482,7 +508,7 @@ func _place_outer_towers(count: int, peer_sep: float, turret_sep: float) -> void
 		attempts += 1
 		var theta := sector_offset + sector * float(slot) + _rng.randf_range(-sector * 0.35, sector * 0.35)
 		slot = (slot + 1) % maxi(count, 1)
-		var min_d := GameConfig.FORT_CLEAR_RADIUS + 30.0
+		var min_d := _fort_clear + 30.0
 		var grass_r := _lut_at(_grass_lut, theta)
 		var sand_r := _lut_at(_sand_lut, theta)
 		# Prefer inland grass; allow the upper beach edge, never near the water.
@@ -571,7 +597,7 @@ func _scatter_trees() -> void:
 			d = lerpf(grass_r + 6.0, sand_r - 10.0, _rng.randf_range(0.15, 0.75))
 		else:
 			d = grass_r + _rng.randf_range(-8.0, minf(14.0, shelf * 0.3))
-		if d < GameConfig.FORT_CLEAR_RADIUS + 25.0 and not scenic:
+		if d < _fort_clear + 25.0 and not scenic:
 			continue
 		if scenic and d < _grass_min_radius * 0.35:
 			continue
@@ -659,7 +685,7 @@ func _generate_island_shape() -> void:
 		grass_cap = minf(_grass_min_radius * 1.05, big_r * 0.58)
 		# Don't let the 0.58 ratio choke the gun ring on mid-size islets.
 		if GameConfig.tower_count_range_for_level(level).y > 0:
-			grass_cap = maxf(grass_cap, GameConfig.FORT_CLEAR_RADIUS + 45.0)
+			grass_cap = maxf(grass_cap, _fort_clear + 45.0)
 
 	# Multiplicative silhouette first — this is what makes bays/crescents readable.
 	var profile := PackedFloat32Array()
@@ -709,7 +735,7 @@ func _generate_island_shape() -> void:
 		var g := grass_pad + fine.get_noise_2d(nx, ny) * 0.04 * grass_pad
 		g += harmonics[0][1] * 0.35 * sin(harmonics[0][0] * theta + harmonics[0][3])
 		var g_floor: float = (
-			GameConfig.FORT_CLEAR_RADIUS * 0.92 if not scenic else grass_pad * 0.7
+			_fort_clear * 0.92 if not scenic else grass_pad * 0.7
 		)
 		g = clampf(g, g_floor, grass_cap)
 

@@ -59,6 +59,9 @@ var fire_cooldown: float = 0.0
 var _main: Node2D
 var _dead: bool = false
 var _keep_center: Vector2 = GameConfig.ISLAND_CENTER
+## The fort scales with its island, so the disc a gun refuses to shoot through
+## has to come from the island rather than from the global constant.
+var _keep_radius: float = GameConfig.KEEP_RADIUS
 var _range: float = GameConfig.TURRET_RANGE
 var _cooldown: float = GameConfig.TURRET_FIRE_COOLDOWN
 ## World-space bearing from the keep out through this corner — the mount's
@@ -85,8 +88,10 @@ func configure(
 	keep_center: Vector2 = Vector2.ZERO,
 	range_override: float = -1.0,
 	cooldown_override: float = -1.0,
+	keep_radius: float = -1.0,
 ) -> void:
 	_main = main_ref
+	_keep_radius = keep_radius if keep_radius > 0.0 else GameConfig.KEEP_RADIUS
 	_range = range_override if range_override > 0.0 else GameConfig.TURRET_RANGE
 	_cooldown = cooldown_override if cooldown_override > 0.0 else GameConfig.TURRET_FIRE_COOLDOWN
 	_keep_center = keep_center if keep_center != Vector2.ZERO else (
@@ -260,7 +265,7 @@ func _shot_hits_keep(target_pos: Vector2) -> bool:
 	var a := global_position
 	var b := target_pos
 	var c := _keep_center
-	var r := GameConfig.KEEP_RADIUS * 0.75
+	var r := _keep_radius * 0.75
 	var ab := b - a
 	var ab_len_sq := ab.length_squared()
 	if ab_len_sq < 0.001:

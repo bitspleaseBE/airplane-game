@@ -277,6 +277,9 @@ const ISLAND_RADIUS_MAX := 380.0
 const ISLAND_RADIUS_STRONGHOLD := 460.0
 const KEEP_RADIUS := 90.0
 const FORT_CLEAR_RADIUS := 110.0
+## Ceiling on fort growth, so the finale's fortress fills its isle without
+## swallowing the grass the outer ring and the palms need.
+const FORT_SCALE_MAX := 1.95
 const WATER_MIN_RADIUS := 255.0
 ## Guns stay this far inside the grass line so they don't sit on the beach.
 const TOWER_INLAND_MARGIN := 52.0
@@ -361,6 +364,36 @@ func island_radius_for_level(level: int) -> float:
 			return lerpf(ISLAND_RADIUS_MAX, ISLAND_RADIUS_STRONGHOLD, 0.8)
 		return ISLAND_RADIUS_STRONGHOLD
 	return lerpf(ISLAND_RADIUS, ISLAND_RADIUS_MAX, level_t(n))
+
+
+## The fort grows with its isle.
+##
+## Corner mounts sit on the fort's own corner towers, so a fort that does not
+## scale leaves the "ring" of guns as a ~105 px huddle in the middle of a 460 px
+## island: four sectors radiating from nearly the same point, some 400 px from
+## the shore they are meant to defend. Measured, that made the milestone
+## strongholds the *easiest* bastions in the campaign, and it quietly voided the
+## rule the whole campaign is built on — four live guns close the ring, three
+## leave a usable gap — because the geometry that rule describes only holds when
+## the mounts are spread across their island.
+##
+## Scaling by island radius keeps the fort at the fraction of its isle that
+## bastion 1 uses (~45%), which is the proportion every sector constant was
+## tuned against in the first place.
+func fort_scale_for_radius(radius: float) -> float:
+	return clampf(radius / ISLAND_RADIUS, 1.0, FORT_SCALE_MAX)
+
+
+func fort_scale_for_level(level: int) -> float:
+	return fort_scale_for_radius(island_radius_for_level(level))
+
+
+func keep_radius_for_level(level: int) -> float:
+	return KEEP_RADIUS * fort_scale_for_level(level)
+
+
+func fort_clear_radius_for_level(level: int) -> float:
+	return FORT_CLEAR_RADIUS * fort_scale_for_level(level)
 
 
 func keep_hp_for_level(level: int) -> int:
