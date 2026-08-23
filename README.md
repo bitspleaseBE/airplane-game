@@ -2,7 +2,7 @@
 
 Portrait top-down siege game: tap the water around an island fortress to deploy bombers, dodge corner turrets, and bring down the keep.
 
-Built with **Godot 4.7** (Compatibility / GL renderer) for web, Android, and iOS.
+Built with **Godot 4.7** (Compatibility / GL renderer) for desktop (Windows / Linux / macOS), web, Android, and iOS.
 
 ## Play
 
@@ -12,15 +12,17 @@ godot --path .
 
 Or open this folder in the Godot 4.7 editor and press Play.
 
-**Controls:** tap / click the blue water around the island to deploy a plane, or hold to stream them. Birds leave the deck on a fixed scramble gap, so mashing gains you nothing — **where** each one enters is the whole game.
+**Controls:** tap / click the blue water around the island to deploy a plane, or hold to stream them. Press **FEINT** (or `Q` / gamepad X) and your next tap sends a decoy drone instead. On desktop and controller, `WASD` / left stick walks an aiming reticle over the sea and `Space` / `A` scrambles at it — the reticle turns red over water a bird cannot launch from, and its inner arc is the scramble gap counting down. `Esc` / `Start` pauses, `F11` toggles fullscreen, `M` mutes, `R` re-flies the bastion. Birds leave the deck on a fixed scramble gap, so mashing gains you nothing — **where** each one enters is the whole game.
 
 Read the water before you tap. Every corner gun owns a sector, drawn on the sea as a warm wedge; the cool gaps between sectors are the safe lanes in. A wedge that brightens is a gun that has locked onto one of your birds and is about to fire — and a gun stays committed for over a second, so a bird sent into a hot sector buys the next one a clean run. Silence a gun and its sector goes dark for good.
 
 **Keep moving.** Sectors are not fixed. Lean on one lane and the mounts traverse to meet you — you will watch the wedges swing across your approach and shut it. Find the next quiet water, hit from there, and let the fort chase. A squadron flown down a single bearing gets ground down; on the milestone strongholds it simply fails.
 
+**Feint to make your own lane.** A decoy drone carries nothing and soaks three hits, and the fort's crews would rather shoot at it than at your bombers — so a feint thrown ~50° off your attack bearing walks the mounts guarding that lane away from it. Charges come back on a timer, but a drone leaves the same deck as a bomber, so every feint costs you a bird's slot in time. Feints are the difference between finding the quiet water and *making* it.
+
 Destroy the central keep to win; spend the squadron with the keep still standing and you lose. Beat a bastion to pan to the next of 20 islands.
 
-**Airframes are earned per level band:** gunships (1–5) hunt corner AA then strafe with their nose gun, bombers (6–10) drop one heavy bomb, strike jets (11–15) fire a guided missile from standoff and bank away, carpet bombers (16–20) begin their run 265 px out and lay three bombs along the keep track. The stronghold evolves too — missile batteries from level 4, flak airbursts from 13.
+**Airframes are earned per level band:** gunships (1–5) hunt corner AA then strafe with their nose gun, bombers (6–10) drop one heavy bomb, strike jets (11–15) fire a guided missile from standoff and bank away, carpet bombers (16–20) begin their run 205 px out and lay three bombs along the keep track. The stronghold evolves too — missile batteries from level 4, flak airbursts from 13.
 
 ## Automated playtest
 
@@ -31,7 +33,32 @@ tools/playtest.sh --planes=15 --duration=60   # full run to a win/lose ending
 
 Simulates taps, saves screenshots and a `summary.json` to `playtest/latest/`, and prints a `PLAYTEST_SUMMARY` JSON line. Agents follow the write code → playtest → improve loop in `.cursor/skills/playtest-loop/`.
 
-Strategies are `spread` / `blitz` / `waves` (random placement), `flank` (re-reads the board before every deploy and moves to whatever water is quiet now), and `column` (locks the quietest bearing once and commits the whole squadron to it). The pair that matters is **`flank` must win where `column` fails** — that is the measurement that the siege still demands changing direction. See `.cursor/skills/design-gates/`.
+Extra capture flags: `--pause-menu` / `--pause-menu=options` shoot the pause
+panel (built in code, so a screenshot is the only layout regression test),
+and `--reticle` drives the keyboard aim path so the crosshair appears in the
+frames.
+
+`--modal-restart` is a pass/fail regression check, not a capture: it wins a
+bastion, waits the result modal out, then restarts from the pause menu and
+asserts the siege is actually playable afterwards. It prints
+`MODAL_RESTART_CHECK pass|fail` and exits non-zero on failure. It exists because
+that combination shipped broken — the modal stayed up over a live siege with
+`mouse_filter=STOP`, so every tap was swallowed and the only button available
+ate the level advance.
+
+`--seed=N` is now authoritative: the level scene used to call `randomize()`
+after the harness seeded, so every "seeded" balance result was really
+run-to-run noise. Same seed, same outcome.
+
+**Never run a balance scenario with `--headless`.** The dummy renderer does not
+play the same game. Measured side by side on the same level and seed, a siege
+resolved in ~150 s headless and ~25 s rendered, with *opposite* win/lose
+outcomes — every threshold in `.cursor/skills/design-gates/` is calibrated
+against a real renderer, so a headless number is a different game rather than a
+rougher version of the same one. `tools/balance_check.sh` and
+`tools/perf_check.sh` both wrap Godot in `xvfb` when there is no display.
+
+Strategies are `spread` / `blitz` / `waves` (random placement), `flank` (re-reads the board before every deploy and moves to whatever water is quiet now), `column` (locks the quietest bearing once and commits the whole squadron to it), and `decoy` (flies `column`, but buys that one bearing with feints thrown just outside it). The pair that matters is **`flank` must win where `column` fails** — that is the measurement that the siege still demands changing direction. See `.cursor/skills/design-gates/`.
 
 ## Project layout
 
@@ -41,6 +68,37 @@ Strategies are `spread` / `blitz` / `waves` (random placement), `flank` (re-read
 - `inspiration/` — original Kenney packs (ignored by Godot via `.gdignore`)
 - `blueprint.md` — design decisions
 - `build/` — export output (created when you export)
+
+## Options and saves
+
+`Esc` opens the pause menu; **Options** covers master / effects / music /
+ambience levels, fullscreen, v-sync, screen-shake strength, reduced motion,
+and a colourblind mode for the threat overlay. The entire tactical read is a
+warm wedge over cool sea, which is exactly the contrast a red-green deficiency
+loses, so the wedge hue and its alpha are both settings rather than constants.
+
+Everything persists to `user://settings.cfg` — settings, campaign progress
+(highest bastion reached), and the best star rating per bastion. Stars only
+ever improve, so replaying a cleared bastion can't cost you a rating. On the
+web build `user://` is browser storage; on desktop it is the platform's app
+data directory.
+
+## Desktop export
+
+Presets: `Windows Desktop`, `Linux`, `macOS`. Requires Godot **4.7.1** export
+templates.
+
+```bash
+mkdir -p build/linux build/windows build/macos
+godot --headless --path . --export-release "Linux"           build/linux/BastionBomber.x86_64
+godot --headless --path . --export-release "Windows Desktop" build/windows/BastionBomber.exe
+godot --headless --path . --export-release "macOS"           build/macos/BastionBomber.zip
+```
+
+The window opens at 576×1024 and is resizable; the viewport is 720×1280 with
+`expand` stretch, so a wider window shows more ocean rather than stretching the
+island. macOS needs codesign identity / team id filled into the preset before
+a distributable build.
 
 ## Web export
 
@@ -98,16 +156,54 @@ Orientation is locked to portrait in the preset.
 - Levels: 20 procedural islands in one ocean; camera pans between them
 - Framing: the camera zooms out per bastion (0.8 down to ~0.6) so the island plus a ~120 px ring of tappable water always fits across the screen. Not cosmetic — at a fixed zoom the level 15 and 20 islands were wider than the viewport, leaving no water to tap east or west and removing those approach bearings from the game entirely
 - Deploy rate: one bird per scramble gap (0.5–1.0 s by wing) for taps *and* holds — the only resource clock in the game
-- Squadron: sized per wing, from measured good-play runs — gunship 36→48, bomber 38→54, strike 42→54, carpet 56→76
+- Squadron: sized per wing from the measured rendered matrix so a well-flown
+  siege spends about two thirds of the wing — gunship 44→60, bomber 46→58,
+  strike 56→76, carpet 62→82. The strike band is tightest because strike jets
+  are the most efficient wing measured (they release from standoff and bank
+  away, so ~two thirds deliver, against ~a third for the wings that overfly).
+  The previous numbers were 3–4× oversized: good play cleared the bastion 10
+  stronghold on 12 birds of 54 and the finale on 16 of 76, which is exactly the
+  failure the design-gates skill names — if a level falls to a third of its
+  squadron, losses never bite and no placement decision shows up in the result
 - Wings by level band: gunship 1–5 (SEAD — prefer corner AA, 5 strafe shots × 4 dmg), bomber 6–10 (one 20-dmg bomb), strike 11–15 (guided missile, 20 dmg, launched 230 px out — scales with AA reach), carpet 16–20 (3 bombs × 10 dmg along the keep track)
-- Keep HP: 100 + 4×(level−1); corner AA and outer towers scale up
-- Corner AA: each gun covers a ~120° sector centred on its current facing and cannot traverse past it. Four live guns close the ring, three leave a usable gap, two leave the island open. Reach scales with the island (capped at 470) so the contested water stays a real space on the big late strongholds
-- Sectors slew: a mount swings its whole sector toward sustained pressure (up to ~57° off its corner) and drifts back when the sky clears. This is what forces the attack to keep moving — a fixed bearing gets answered and shut
+- Keep HP: 170 + 17×(level−1) → 493 at bastion 20. Payload per bird roughly
+  triples across the campaign (a gunship puts ~5 on the keep, a carpet stick
+  ~11) while the keep used to go only 100→176, so every later bastion was
+  cheaper in ordnance than the one before it
+- Emplacements: corner AA 60 HP, outer towers 45 HP — three bombs and about two
+  respectively. Worth more than two bombs, or a long siege just suppresses the
+  ring early and flies the back half unopposed; much more than that and the ring
+  never thins, which measured a collapse in bomb delivery from 42% to 15%
+- Corner AA: each gun covers a ~120° sector centred on its current facing and cannot traverse past it. Four live guns close the ring, three leave a usable gap, two leave the island open. Reach scales with the island (capped at 560, plus 120 on the milestone strongholds) so the contested water stays a real space on the big late strongholds. The stronghold bonus is a measured need, not flavour: sector slew punishes *sustained* pressure, but only if a bird is under fire long enough for the mounts to walk across its lane, and on the 460-radius finale the contested band was thin enough that a carpet bird crossed it in about a second — shorter than one gun's target lock — so a locked bearing was no worse than an adaptive one
+- Sectors slew: a mount swings its whole sector toward sustained pressure (up to ~69° off its corner) and drifts back when the sky clears. This is what forces the attack to keep moving — a fixed bearing gets answered and shut
 - Corner AA leads its target, commits to it for 1.25 s, and traverses at 1.5 rad/s — slower than a bird's run in, which is what makes baiting work
 - Outer towers traverse freely but reach short: the close-in punish for overflying, not the strategic ring
 - Stronghold arsenal: machine guns from level 1, missile launchers from 4, flak airbursts from 13 (downs every plane within 60 px of the burst)
 - Difficulty is staggered one step at a time: third corner gun at 3, missile launcher at 4, faster gun cycle at 5
 - Defense pads are color-coded: red = keep AA, green = MG, amber = missile, crimson = flak
+- **Known gap — a fixed bearing still wins the finale.** Current measured state
+  (rendered, 2-3 seeds per cell): every bastion is winnable, adaptive play
+  (`flank`) spends 48-100% of its wing (mostly 52-84%), and wins land in 23-90s.
+  A locked bearing (`column`) now loses 2 of 2 at bastion 15 and 1 of 2 at
+  bastion 10, but still wins bastion 20, where it must never win — and it spends
+  70-96% of the wing doing it, against 13 birds of 76 before any of this work.
+  The finale resists every lever tried across nine measured rounds: squadron
+  size, keep HP, emplacement HP, ring density, slew speed and span, AA reach,
+  the carpet release point, and the gun-ring geometry itself. What is left is
+  that at bastion 20 adaptive and fixed-bearing play cost within ~10% of each
+  other, so no threshold separates them; the discrimination has to come from a
+  mechanic, not a number. Worth noting the reach bonus above is load-bearing
+  here: removing it flipped bastion 15 from a clean pass to a fail
+- **Known gap — stronghold gun placement, probably the same bug.** `island.gd::_place_turrets` seats all
+  four corner guns at a fixed ~105 px from the island centre
+  (`FORT_CLEAR_RADIUS * 0.95`) whatever the island's size, because they sit on
+  the fort sprite's corner towers. On the 240-radius opener that is a real ring;
+  on the 460-radius finale it is a huddle in the middle, ~400 px from the shore
+  it defends. So "four live guns close the ring, three leave a gap" — the stated
+  spine of the tactics — degenerates as islands grow, and the milestone
+  strongholds measure as the *easiest* levels in the campaign. Reach bonuses
+  paper over it; the fix is to scale the fort with the island or decouple the
+  mounts from its art
 - Stars on win: 3 = ≤55% of the squadron, 2 = ≤80%, 1 = more
 - One bullet downs a plane (sizzle-down, no payload)
 

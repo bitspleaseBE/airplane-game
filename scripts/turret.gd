@@ -31,7 +31,13 @@ const TRACK_SLACK := 0.12
 ## so the best play becomes "find the hole once, then feed the whole squadron
 ## through it in a straight line", which is exactly what the campaign is meant
 ## to refuse. A lane you lean on closes, and you have to keep moving.
-const SECTOR_SLEW_SPEED := 0.5
+## Raised from 0.5 on measurement. With the squadron and the ring both retuned,
+## a locked-bearing column still took the milestone strongholds — it needed more
+## birds than adaptive flanking did, which is the right ordering, but "more
+## expensive" is not the rule. The rule is that a fixed heading must not win, and
+## slew is the only mechanism that punishes *sustained* pressure specifically
+## rather than punishing every attack equally.
+const SECTOR_SLEW_SPEED := 0.8
 const SECTOR_RECENTRE_SPEED := 0.16
 ## How far off its corner a mount may be pulled. Wide enough that the two guns
 ## flanking an empty corner mount can between them close the 90° hole it leaves
@@ -39,7 +45,7 @@ const SECTOR_RECENTRE_SPEED := 0.16
 ## shut, and feeding the squadron down it in a straight line simply wins.
 ## Still bounded, so a feint cannot drag the whole fort to one side and strip
 ## the rest of the island bare.
-const SECTOR_HOME_SPAN := 1.0  # ~57°
+const SECTOR_HOME_SPAN := 1.2  # ~69°
 ## Gunners under-lead a little and scatter a little. Perfect prediction turned
 ## the slower airframes into free kills — the sector should be dangerous, not
 ## deterministic, or there is no point flying through one under any plan.
@@ -53,6 +59,9 @@ var fire_cooldown: float = 0.0
 var _main: Node2D
 var _dead: bool = false
 var _keep_center: Vector2 = GameConfig.ISLAND_CENTER
+## The fort scales with its island, so the disc a gun refuses to shoot through
+## has to come from the island rather than from the global constant.
+var _keep_radius: float = GameConfig.KEEP_RADIUS
 var _range: float = GameConfig.TURRET_RANGE
 var _cooldown: float = GameConfig.TURRET_FIRE_COOLDOWN
 ## World-space bearing from the keep out through this corner — the mount's
@@ -79,8 +88,10 @@ func configure(
 	keep_center: Vector2 = Vector2.ZERO,
 	range_override: float = -1.0,
 	cooldown_override: float = -1.0,
+	keep_radius: float = -1.0,
 ) -> void:
 	_main = main_ref
+	_keep_radius = keep_radius if keep_radius > 0.0 else GameConfig.KEEP_RADIUS
 	_range = range_override if range_override > 0.0 else GameConfig.TURRET_RANGE
 	_cooldown = cooldown_override if cooldown_override > 0.0 else GameConfig.TURRET_FIRE_COOLDOWN
 	_keep_center = keep_center if keep_center != Vector2.ZERO else (
@@ -164,15 +175,27 @@ func _slew_sector(delta: float) -> void:
 ## the mount traverse to meet it. INF when the sky is clear.
 func _contact_bearing() -> float:
 	var best := INF
-	var best_d := _range
+	var best_score := INF
 	for child in _main.get_planes():
 		if child is PlaneUnit and child.phase == PlaneUnit.Phase.FLYING:
 			var to: Vector2 = child.global_position - global_position
 			var d: float = to.length()
-			if d < best_d:
-				best_d = d
+			if d >= _range:
+				continue
+			var score := _lure_score(child, d)
+			if score < best_score:
+				best_score = score
 				best = to.angle()
 	return best
+
+
+## Distance as the crew perceives it. A decoy reads closer than it is, so it
+## wins target selection and sector slew against a real bird at similar range —
+## which is the entire mechanism the player's decoy charge buys. The true range
+## gate is applied before this, so the discount only ever reorders contacts the
+## mount could already engage; it never extends its reach.
+func _lure_score(plane: PlaneUnit, distance: float) -> float:
+	return distance * GameConfig.DECOY_LURE_BIAS if plane.is_decoy else distance
 
 
 ## Hold the current bird until it dies, leaves, or the lock expires; only then
@@ -200,12 +223,12 @@ func _is_engageable(plane: PlaneUnit) -> bool:
 
 func _nearest_plane() -> PlaneUnit:
 	var best: PlaneUnit = null
-	var best_d := _range
+	var best_score := INF
 	for child in _main.get_planes():
 		if child is PlaneUnit and child.phase == PlaneUnit.Phase.FLYING:
 			var to: Vector2 = child.global_position - global_position
 			var d: float = to.length()
-			if d >= best_d:
+			if d >= _range:
 				continue
 			# Skip planes we can't bring the barrel onto (deep in the keep wedge)
 			# or whose shot line would punch through the keep.
@@ -213,7 +236,10 @@ func _nearest_plane() -> PlaneUnit:
 				continue
 			if _shot_hits_keep(child.global_position):
 				continue
-			best_d = d
+			var score := _lure_score(child, d)
+			if score >= best_score:
+				continue
+			best_score = score
 			best = child
 	return best
 
@@ -239,7 +265,7 @@ func _shot_hits_keep(target_pos: Vector2) -> bool:
 	var a := global_position
 	var b := target_pos
 	var c := _keep_center
-	var r := GameConfig.KEEP_RADIUS * 0.75
+	var r := _keep_radius * 0.75
 	var ab := b - a
 	var ab_len_sq := ab.length_squared()
 	if ab_len_sq < 0.001:

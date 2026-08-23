@@ -39,7 +39,10 @@ const RAY_STEPS := 8
 const CONE_HALF_ANGLE := 0.4
 ## Warm orange rather than pure red: a low-alpha red over this palette's teal
 ## water desaturates to grey and reads as cloud shadow instead of as danger.
-const THREAT_COLOR := Color(1.0, 0.33, 0.05)
+## The colourblind modes in Settings replace it — this whole layer is a
+## warm-over-cool read, which is exactly what a red-green deficiency loses, so
+## the hue is a setting rather than a constant.
+const THREAT_COLOR_DEFAULT := Color(1.0, 0.33, 0.05)
 ## Sectors stack wherever corner guns overlap, so each one has to stay light.
 const SECTOR_ALPHA := 0.13
 ## Crisp boundaries are what make a sector read as a deliberate line of fire
@@ -61,10 +64,20 @@ var _time: float = 0.0
 var _island: Island
 var _center: Vector2 = Vector2.ZERO
 var _redraw_accum: float = 0.0
+var _threat_color: Color = THREAT_COLOR_DEFAULT
+var _alpha_scale: float = 1.0
 
 
 func setup(main_ref: Node2D) -> void:
 	_main = main_ref
+	_refresh_palette()
+	Settings.accessibility_changed.connect(_refresh_palette)
+
+
+func _refresh_palette() -> void:
+	_threat_color = Settings.threat_color()
+	_alpha_scale = Settings.threat_alpha_scale()
+	queue_redraw()
 
 
 func _process(delta: float) -> void:
@@ -123,8 +136,8 @@ func _draw_wedge(
 			var a := aim - half_angle + half_angle * 2.0 * float(seg) / float(segments)
 			var p := origin + Vector2.from_angle(a) * reach * t
 			pts.append(p)
-			var alpha: float = peak * radial * _water_mask(p)
-			cols.append(Color(THREAT_COLOR.r, THREAT_COLOR.g, THREAT_COLOR.b, alpha))
+			var alpha: float = minf(peak * radial * _water_mask(p) * _alpha_scale, 1.0)
+			cols.append(Color(_threat_color.r, _threat_color.g, _threat_color.b, alpha))
 		ring_pts.append(pts)
 		ring_cols.append(cols)
 
@@ -180,7 +193,11 @@ func _draw_ray(gun: Node2D, angle: float, alpha: float, width: float) -> void:
 		var t0 := float(i) / float(steps)
 		var t1 := float(i + 1) / float(steps)
 		var p0 := origin + dir * reach * t0
-		var a := alpha * _water_mask(p0) * (1.0 - t0 * t0)
+		var a := minf(alpha * _water_mask(p0) * (1.0 - t0 * t0) * _alpha_scale, 1.0)
 		if a <= 0.012:
 			continue
-		draw_line(p0, origin + dir * reach * t1, Color(1.0, 0.55, 0.2, a), width)
+		# Boundary lines sit a shade brighter than the wash they edge, whatever
+		# palette is active — that contrast is what makes them read as a line.
+		var edge := _threat_color.lightened(0.25)
+		edge.a = a
+		draw_line(p0, origin + dir * reach * t1, edge, width)

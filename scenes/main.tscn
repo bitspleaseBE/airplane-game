@@ -1,4 +1,4 @@
-[gd_scene load_steps=10 format=3]
+[gd_scene load_steps=12 format=3]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1"]
 [ext_resource type="PackedScene" path="res://scenes/hud.tscn" id="4"]
@@ -6,6 +6,8 @@
 [ext_resource type="Shader" path="res://shaders/clouds.gdshader" id="6"]
 [ext_resource type="Texture2D" path="res://assets/textures/water_noise.png" id="7"]
 [ext_resource type="Script" path="res://scripts/threat_overlay.gd" id="8"]
+[ext_resource type="Script" path="res://scripts/deploy_reticle.gd" id="9"]
+[ext_resource type="Script" path="res://scripts/pause_menu.gd" id="10"]
 
 [sub_resource type="ShaderMaterial" id="WaterMat"]
 shader = ExtResource("5")
@@ -125,4 +127,13 @@ z_index = 6
 [node name="Effects" type="Node2D" parent="."]
 z_index = 12
 
+[node name="Reticle" type="Node2D" parent="."]
+z_index = 20
+script = ExtResource("9")
+
 [node name="HUD" parent="." instance=ExtResource("4")]
+
+[node name="PauseMenu" type="CanvasLayer" parent="."]
+process_mode = 3
+layer = 40
+script = ExtResource("10")

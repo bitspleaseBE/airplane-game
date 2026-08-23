@@ -41,6 +41,14 @@ var _force_wing_name := "bomber"
 var _force_lose := false
 var _force_win := false
 var _force_campaign_win := false
+## UI-only captures. The pause panel and the aiming reticle are both built in
+## code, so a screenshot is the only thing that catches a layout regression.
+var _show_pause := ""
+var _show_reticle := false
+## Regression check for a shipped bug: restarting from the pause menu while a
+## result modal was open left the modal on screen over a live siege with
+## mouse_filter=STOP, so every tap was swallowed and the level was unplayable.
+var _check_modal_restart := false
 var _squadron_cap := -1
 var _perf := false
 var _ocean_mode := ""  # "" (normal) | "flat" | "off"
@@ -59,6 +67,16 @@ var _input_taps := 0
 var _direct_spawns := 0
 var _missed_deploys := 0
 var _deployed := 0
+var _decoys_sent := 0
+
+
+## The seed the harness was asked to run, or -1 for none. Read by main.gd,
+## which must not call randomize() over the top of a requested seed — that is
+## what made the balance gate non-reproducible: --seed was set here, then
+## clobbered a frame later when the level scene came up, so Gate 1 was really
+## measuring run-to-run noise.
+func requested_seed() -> int:
+	return _rng_seed
 
 
 func _ready() -> void:
@@ -107,6 +125,18 @@ func _ready() -> void:
 			_duration = mini(_duration, 4.0)
 		elif arg.begins_with("--squadron="):
 			_squadron_cap = int(arg.trim_prefix("--squadron="))
+		elif arg == "--pause-menu" or arg.begins_with("--pause-menu="):
+			_show_pause = "root"
+			if arg.begins_with("--pause-menu="):
+				_show_pause = arg.trim_prefix("--pause-menu=").strip_edges().to_lower()
+			_planes_to_spawn = 0
+			_duration = minf(_duration, 4.0)
+		elif arg == "--reticle":
+			_show_reticle = true
+		elif arg == "--modal-restart":
+			_check_modal_restart = true
+			_planes_to_spawn = 0
+			_duration = minf(_duration, 8.0)
 		elif arg == "--perf":
 			_perf = true
 		elif arg.begins_with("--ocean="):
@@ -119,6 +149,8 @@ func _ready() -> void:
 		RenderingServer.viewport_set_measure_render_time(get_viewport().get_viewport_rid(), true)
 		# Periodic screenshots stall the pipeline (GPU readback) — start/end only.
 		_shot_interval = 100000.0
+	if not _show_pause.is_empty():
+		process_mode = Node.PROCESS_MODE_ALWAYS
 	if _rng_seed >= 0:
 		seed(_rng_seed)
 	DirAccess.make_dir_recursive_absolute(_abs_out())
@@ -213,6 +245,31 @@ func _run() -> void:
 			hud_w.force_wing_briefing(wing_type)
 			await get_tree().create_timer(1.4).timeout
 
+	if _show_reticle:
+		# Nudging the reticle through the normal path is what proves the
+		# keyboard aim wiring works, not just that the node draws.
+		Input.action_press("cursor_right")
+		await get_tree().create_timer(0.35).timeout
+		Input.action_release("cursor_right")
+		await get_tree().process_frame
+
+	if _check_modal_restart:
+		await _run_modal_restart_check()
+		return
+
+	if not _show_pause.is_empty():
+		var menu := _main.get_node_or_null("PauseMenu")
+		if menu and menu.has_method("open"):
+			menu.open()
+			if _show_pause == "options" and menu.has_method("show_options"):
+				menu.show_options()
+			await get_tree().create_timer(0.3).timeout
+		await _screenshot("pause")
+		_result = "pause-menu"
+		_write_summary()
+		get_tree().quit(0)
+		return
+
 	await _screenshot("start")
 
 	if _force_lose and _main.has_method("_set_lost"):
@@ -256,6 +313,10 @@ func _run() -> void:
 		if _force_lose or _force_win:
 			await get_tree().process_frame
 			continue
+		if _strategy == "decoy" and _should_feint():
+			await _deploy_decoy()
+			await get_tree().create_timer(_deploy_delay(_deployed)).timeout
+			continue
 		if _deployed < _planes_to_spawn:
 			if await _deploy_bomber(_deployed):
 				_deployed += 1
@@ -279,6 +340,97 @@ func _run() -> void:
 	print("PLAYTEST end shot saved")
 	_write_summary()
 	get_tree().quit(0)
+
+
+## Win the level, let the modal settle, then restart from the pause menu and
+## assert the siege is actually playable afterwards. Prints MODAL_RESTART_CHECK
+## with pass/fail so a caller can gate on it.
+func _run_modal_restart_check() -> void:
+	var hud := _main.get_node_or_null("HUD")
+	var menu := _main.get_node_or_null("PauseMenu")
+	if hud == null or menu == null:
+		print("MODAL_RESTART_CHECK fail reason=missing-nodes")
+		_result = "modal-restart-fail"
+		_write_summary()
+		get_tree().quit(1)
+		return
+
+	_main._set_won()
+	# Stars flip one at a time; wait the modal out so this exercises the real
+	# state a player would hit, not a half-built overlay.
+	await get_tree().create_timer(2.6).timeout
+	var overlay_after_win: bool = hud.overlay.visible
+
+	menu.open()
+	await get_tree().create_timer(0.25).timeout
+	menu._on_restart_level()
+	await get_tree().create_timer(0.6).timeout
+
+	var overlay_still_up: bool = hud.overlay.visible
+	var playing: bool = _main.state == _main.State.PLAYING
+	var unpaused := not get_tree().paused
+	var ok := overlay_after_win and not overlay_still_up and playing and unpaused
+	print(
+		(
+			"MODAL_RESTART_CHECK %s modal_shown=%s modal_cleared=%s playing=%s unpaused=%s"
+			% [
+				"pass" if ok else "fail",
+				overlay_after_win,
+				not overlay_still_up,
+				playing,
+				unpaused,
+			]
+		)
+	)
+	await _screenshot("modal-restart")
+	_result = "modal-restart-pass" if ok else "modal-restart-fail"
+	_write_summary()
+	get_tree().quit(0 if ok else 1)
+
+
+## True when the column has flown far enough since the last feint and a charge
+## is actually available.
+func _should_feint() -> bool:
+	if _deployed <= 0 or _deployed >= _planes_to_spawn:
+		return false
+	# A feint is refused once the wing is spent, so without this the loop would
+	# sit here re-arming a charge it can never use for the rest of the run.
+	if "planes_remaining" in _main and _main.planes_remaining <= 0:
+		return false
+	if not ("decoy_charges" in _main) or _main.decoy_charges <= 0:
+		return false
+	return _deployed >= (_decoys_sent + 1) * DECOY_EVERY
+
+
+## Arm a feint and throw it at the busiest water, which is the only place a
+## decoy earns anything: it drags those mounts off the lane the column needs.
+func _deploy_decoy() -> void:
+	if not _main.has_method("set_decoy_armed"):
+		return
+	var center: Vector2 = (
+		_main.active_center if "active_center" in _main else GameConfig.ISLAND_CENTER
+	)
+	var water_min := GameConfig.WATER_MIN_RADIUS
+	if _main.has_method("active_water_min_radius"):
+		water_min = _main.active_water_min_radius()
+	var theta := _feint_angle(_column_angle if _column_locked else _coldest_angle())
+	var world := center + Vector2.from_angle(theta) * _deploy_radius(theta, water_min)
+	var before: int = _main.decoy_charges
+	_main.set_decoy_armed(true)
+	_tap(world)
+	for _f in 30:
+		await get_tree().process_frame
+		if _main.decoy_charges < before:
+			_decoys_sent += 1
+			return
+	# Input path did not take it; go through the game API like _deploy_bomber.
+	if _main.has_method("_try_decoy"):
+		_main.set_decoy_armed(true)
+		_main._try_decoy(world)
+		if _main.decoy_charges < before:
+			_decoys_sent += 1
+			return
+	_main.set_decoy_armed(false)
 
 
 ## Tap water around the island; position and pacing depend on the strategy.
@@ -339,7 +491,7 @@ func _deploy_radius(theta: float, water_min: float) -> float:
 	var near := water_min + 20.0
 	var far := maxf(_max_visible_radius(theta), near)
 	match _strategy:
-		"flank", "column":
+		"flank", "column", "decoy":
 			return clampf(water_min + randf_range(20.0, 110.0), near, far)
 		_:
 			return clampf(water_min + randf_range(20.0, 420.0), near, far)
@@ -374,7 +526,7 @@ func _deploy_angle(i: int) -> float:
 			# is meant to let a human play — if it does not beat the random
 			# strategies, placement is not yet a real decision.
 			return _coldest_angle()
-		"column":
+		"decoy", "column":
 			# The strongest one-direction attack available: find the quietest
 			# bearing once, then commit the whole squadron to it. The campaign is
 			# supposed to answer sustained pressure from a fixed heading, so from
@@ -404,14 +556,45 @@ const FLANK_COLD_BAND := 7
 var _column_locked := false
 var _column_angle := 0.0
 
+## Birds between feints for the `decoy` strategy. Sized so a charge is spent
+## roughly as fast as one comes back — the point of the gate is to measure a
+## decoy layer under its own recharge rate, not an unlimited one.
+const DECOY_EVERY := 5
+
 
 func _coldest_angle() -> float:
+	var scored := _scored_bearings()
+	if scored.is_empty():
+		return randf() * TAU
+	var pick: Array = scored[randi() % mini(FLANK_COLD_BAND, scored.size())]
+	return float(pick[1]) + randf_range(-0.12, 0.12)
+
+
+## Where to throw a feint in order to open `lane`.
+##
+## Not the globally hottest water — that was the first thing tried and it barely
+## moved the needle. A mount can only be dragged SECTOR_HOME_SPAN (~57°) off its
+## own corner, so a decoy on the far side of the island pulls mounts that were
+## never covering the lane anyway. The feint has to land just outside the lane,
+## inside the slew span of the very mounts holding it, and alternate sides so
+## the two flanking mounts both get walked away from the corridor.
+const FEINT_OFFSET := 0.92  # ~53°, just inside SECTOR_HOME_SPAN
+
+
+func _feint_angle(lane: float) -> float:
+	var side := 1.0 if _decoys_sent % 2 == 0 else -1.0
+	return lane + side * FEINT_OFFSET + randf_range(-0.08, 0.08)
+
+
+## Every approach bearing paired with how much living gun attention covers the
+## run in, sorted coldest first.
+func _scored_bearings() -> Array:
 	var island: Object = _main.get_active_island() if _main.has_method("get_active_island") else null
 	if island == null or not island.has_method("living_guns"):
-		return randf() * TAU
+		return []
 	var guns: Array = island.living_guns()
 	if guns.is_empty():
-		return randf() * TAU
+		return []
 	var center: Vector2 = island.get_center()
 	var spawn_r: float = _main.active_water_min_radius() + 90.0
 
@@ -441,15 +624,14 @@ func _coldest_angle() -> float:
 				score += (0.35 + maxf(facing, 0.0)) * (1.0 - d / reach)
 		scored.append([score, theta])
 	scored.sort_custom(func(a, b): return a[0] < b[0])
-	var pick: Array = scored[randi() % mini(FLANK_COLD_BAND, scored.size())]
-	return float(pick[1]) + randf_range(-0.12, 0.12)
+	return scored
 
 
 func _deploy_delay(i: int) -> float:
 	# Stay just above the level's deploy gap so taps aren't eaten by cooldown.
 	var scramble: float = GameConfig.deploy_interval_for_level(_level) + 0.05
 	match _strategy:
-		"blitz", "flank", "column":
+		"blitz", "flank", "column", "decoy":
 			return scramble
 		"waves":
 			return 4.0 if i % WAVE_SIZE == 0 else scramble
@@ -495,10 +677,14 @@ func _write_summary() -> void:
 	var summary := {
 		"result": _result,
 		"strategy": _strategy,
+		"decoys_sent": _decoys_sent,
+		"decoy_hits_absorbed": (
+			int(_main.decoy_hits_absorbed) if _main and "decoy_hits_absorbed" in _main else 0
+		),
 		"level": _level,
 		"seed": _rng_seed,
 		"elapsed_s": snappedf(_elapsed(), 0.1),
-		"keep_hp": _main.keep.hp if is_instance_valid(_main) and "keep" in _main else -1,
+		"keep_hp": _main.keep.hp if is_instance_valid(_main) and _main.keep != null else -1,
 		"planes_remaining": _main.planes_remaining if is_instance_valid(_main) and "planes_remaining" in _main else -1,
 		"planes_deployed": _deployed,
 		"taps_via_input": _input_taps,

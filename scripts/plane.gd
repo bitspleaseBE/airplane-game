@@ -45,6 +45,16 @@ var _bomb_timer: float = 0.0
 var _carpet_stick: int = 0
 var _done: bool = false
 
+## Decoy drone: no payload, soaks several hits, loiters inside the AA envelope
+## so the guns lock onto it instead of the wave behind. See GameConfig's decoy
+## block for why it exists.
+var is_decoy: bool = false
+var _hits_left: int = 1
+var _decoy_life: float = 0.0
+var _orbit_radius: float = 0.0
+var _orbit_spin: float = 1.0
+var _flash_tween: Tween
+
 @onready var sprite: Sprite2D = $Sprite
 @onready var shadow: Sprite2D = $Shadow
 @onready var collision: CollisionShape2D = $CollisionShape2D
@@ -77,6 +87,23 @@ func setup(
 	rotation = (target - global_position).angle()
 
 
+## Turns this bird into a decoy drone. Called instead of nothing extra after
+## setup(), because everything a decoy is is a subtraction: no ordnance, no
+## strafing pass, no run on the keep — it flies in and stays annoying.
+func setup_decoy(orbit_radius: float) -> void:
+	is_decoy = true
+	_hits_left = GameConfig.DECOY_HITS
+	_decoy_life = GameConfig.DECOY_LIFETIME
+	_orbit_radius = maxf(orbit_radius, 1.0)
+	speed = GameConfig.PLANE_SPEED * GameConfig.DECOY_SPEED_MULT
+	# Orbit whichever way it is already travelling, so it never doubles back
+	# across the water the player just cleared.
+	var inbound := (_keep_pos - global_position).normalized()
+	_orbit_spin = 1.0 if inbound.cross(Vector2.from_angle(rotation)) >= 0.0 else -1.0
+	target = _keep_pos
+	_apply_type_look()
+
+
 func _ready() -> void:
 	add_to_group("planes")
 	collision_layer = 2
@@ -92,6 +119,10 @@ func _ready() -> void:
 
 func _apply_type_look() -> void:
 	if sprite == null:
+		return
+	if is_decoy:
+		sprite.modulate = GameConfig.DECOY_TINT
+		sprite.scale = GameConfig.DECOY_SPRITE_SCALE
 		return
 	sprite.modulate = GameConfig.PLANE_TYPE_TINTS[type]
 	sprite.scale = GameConfig.PLANE_TYPE_SPRITE_SCALES[type]
@@ -141,6 +172,9 @@ func current_velocity() -> Vector2:
 
 
 func _fly(delta: float) -> void:
+	if is_decoy:
+		_decoy_loiter(delta)
+		return
 	if _carpet_run:
 		_carpet_pass(delta)
 		return
@@ -183,6 +217,26 @@ func _fly(delta: float) -> void:
 					_carpet_dir = dir
 				_bomb_timer = 0.0
 				_carpet_stick = 0
+
+
+## Close to the loiter ring, then circle it. Circling matters more than the
+## radius does: a decoy holding still is a solved shot, and a mount that solves
+## it goes back to looking at the water the player actually needs.
+func _decoy_loiter(delta: float) -> void:
+	_decoy_life -= delta
+	var offset := global_position - _keep_pos
+	var dist := offset.length()
+	var radial := offset / dist if dist > 0.001 else Vector2.RIGHT
+	var tangent := Vector2(-radial.y, radial.x) * _orbit_spin
+	# Blend inward pull against the tangent so the approach eases into the ring
+	# instead of overshooting and spiralling.
+	var pull := clampf((dist - _orbit_radius) / 120.0, -1.0, 1.0)
+	var dir := (tangent - radial * pull).normalized()
+	global_position += dir * speed * delta
+	rotation = dir.angle()
+	shadow.position = Vector2(14, 18)
+	if _decoy_life <= 0.0:
+		_begin_exit(radial)
 
 
 func _retarget_gunship() -> void:
@@ -274,10 +328,33 @@ func _is_roughly_on_screen() -> bool:
 func take_hit() -> void:
 	if phase != Phase.FLYING:
 		return
+	_hits_left -= 1
+	if is_decoy and _main and _main.has_method("note_decoy_hit"):
+		# Bullets a decoy soaks are bullets that were not aimed at the wave —
+		# the only direct measure of whether a feint is doing anything.
+		_main.note_decoy_hit()
+	if _hits_left > 0:
+		# Flash and keep flying. The whole point of a decoy is that it stays on
+		# the gunner's mind for more than one trigger pull.
+		_flash_tween = _restart_flash_tween()
+		return
+	# A flash still running would keep writing modulate at full alpha while
+	# _sizzle fades it out, so the wreck would strobe and outstay its welcome.
+	if _flash_tween and _flash_tween.is_valid():
+		_flash_tween.kill()
 	phase = Phase.SIZZLING
 	_spin = randf_range(-6.0, 6.0)
 	collision.set_deferred("disabled", true)
 	modulate = Color(1.0, 0.7, 0.5)
+
+
+func _restart_flash_tween() -> Tween:
+	if _flash_tween and _flash_tween.is_valid():
+		_flash_tween.kill()
+	var tw := create_tween()
+	tw.tween_property(self, "modulate", Color(1.6, 1.2, 0.8), 0.05)
+	tw.tween_property(self, "modulate", Color(1, 1, 1), 0.16)
+	return tw
 
 
 func _sizzle(delta: float) -> void:

@@ -2,6 +2,9 @@ class_name Sfx
 extends RefCounted
 
 ## One-shot arcade SFX (Kenney CC0) + looping island ambience (BigSoundBank CC0).
+##
+## One-shots go to the SFX bus and the beach bed to Ambience, so the options
+## menu can balance combat against atmosphere instead of only muting both.
 
 const _CRUNCH: Array[AudioStream] = [
 	preload("res://assets/sfx/explosion_crunch_00.ogg"),
@@ -17,6 +20,9 @@ const _SOFT: Array[AudioStream] = [
 	preload("res://assets/sfx/impact_soft_01.ogg"),
 ]
 const _AMBIENT_ISLAND: AudioStream = preload("res://assets/sfx/ambient_island.ogg")
+
+const SFX_BUS := "SFX"
+const AMBIENCE_BUS := "Ambience"
 
 ## Ambient sits above one-shots so the island bed stays primary.
 const AMBIENT_TARGET_DB := -14.0
@@ -60,6 +66,7 @@ static func start_island_ambient(host: Node) -> void:
 	var player := AudioStreamPlayer.new()
 	player.name = "IslandAmbient"
 	player.stream = stream
+	player.bus = AMBIENCE_BUS
 	player.volume_db = -40.0
 	host.add_child(player)
 	player.play()
@@ -73,6 +80,7 @@ static func _play(host: Node, stream: AudioStream, volume_db: float, pitch: floa
 		return
 	var player := AudioStreamPlayer.new()
 	player.stream = stream
+	player.bus = SFX_BUS
 	player.volume_db = volume_db
 	player.pitch_scale = pitch
 	host.add_child(player)
