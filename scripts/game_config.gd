@@ -146,17 +146,20 @@ const DECOY_SPRITE_SCALE := Vector2(0.92, 0.92)
 ##
 ## Introduced at 17 rather than at a stronghold: bastions 10 and 15 already
 ## measure at or near their limit, and 16 is the carpet wing's own new thing.
+##
+## Bastion 20 is deliberately excluded. The finale already runs a maximal fort —
+## the largest island, the thickest outer ring, the longest reach and the highest
+## keep HP in the campaign — and interceptors on top of that measured unwinnable
+## by adaptive play in 6 of 6 runs across two strength settings. The finale's
+## identity is the fortress itself; this is the late band's threat, not its.
 const INTERCEPTOR_UNLOCK_LEVEL := 17
+const INTERCEPTOR_MAX_LEVEL := 19
 ## Live at once, by level. Kept small — these are a positional threat, not a
 ## damage race, and a swarm of them would just make the finale unwinnable.
-## First tuning: the opening values made bastion 20 unwinnable by any strategy.
-## They were, however, doing the job no number could — adaptive play delivered
-## about three times what a locked bearing did, against a ~10% spread under
-## static guns. So the mechanic stays and its strength comes down: the finale
-## drops to the same live cap as the rest of the band, and the guns cycle
-## slower and reach less far.
+## Two is the measured value: at bastions 17-19 it makes a locked bearing fail
+## 3 of 3 while adaptive play wins 3 of 3, which is the campaign's rule holding
+## on its own merits for the first time anywhere in the game.
 const INTERCEPTOR_MAX_ALIVE := 2
-const INTERCEPTOR_MAX_ALIVE_FINALE := 2
 const INTERCEPTOR_LAUNCH_INTERVAL := 6.0
 ## First one is airborne shortly after the siege opens, so the player meets the
 ## mechanic while they still have a wing to learn it with.
@@ -454,9 +457,9 @@ func keep_hp_for_level(level: int) -> int:
 
 func interceptors_for_level(level: int) -> int:
 	var n := clampi(level, 1, LEVEL_COUNT)
-	if n < INTERCEPTOR_UNLOCK_LEVEL:
+	if n < INTERCEPTOR_UNLOCK_LEVEL or n > INTERCEPTOR_MAX_LEVEL:
 		return 0
-	return INTERCEPTOR_MAX_ALIVE_FINALE if n >= LEVEL_COUNT else INTERCEPTOR_MAX_ALIVE
+	return INTERCEPTOR_MAX_ALIVE
 
 
 func turret_count_for_level(level: int) -> int:
