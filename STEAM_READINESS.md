@@ -181,7 +181,65 @@ repeats them: trimming bomber speed to 1.22 (worse and noisier), and removing
 the stronghold reach bonus on the theory that the scaled ring made it redundant
 (clearly worse — it flipped bastion 15 from pass to fail).
 
-### Iteration 5 — interceptors (in progress)
+### Iteration 5 — interceptors: the first clean gate pass in the game
+
+**Outcome: the mechanic works, and is scoped to bastions 17-19.**
+
+At bastion 17 and 18, adaptive play wins 3 of 3 and a locked bearing loses 3 of
+3. That is the campaign's load-bearing rule holding on its own merits, and no
+amount of tuning static defences ever produced it anywhere: against guns that
+cannot leave their corners, the two strategies cost within ~10% of each other,
+and no threshold separates things that cost the same. One defender that can move
+to where the player keeps attacking separated them by 3x immediately.
+
+The decoy layer composes with it rather than being bypassed — feints pull a
+fighter off a lane on the same lure rule that pulls a gun mount, and in the
+first measured pass took one seed from 473 HP remaining down to 13.
+
+**Bastion 20 is excluded, as design.** The finale already runs a maximal fort;
+interceptors on top measured unwinnable by adaptive play in 6 of 6 runs across
+two strength settings. An unwinnable finale is strictly worse than one a fixed
+bearing can take. The finale keeps its fortress, and its known open gate — but
+it is now healthy: good play wins at 67-89% on 60-80s runs, against 21% and 16s
+when this work started.
+
+### The measurement, third time
+
+Balance runs were still not reproducible. The cause was not the RNG (that fix
+was real but insufficient — I claimed it was the answer before testing it, and
+repeat runs then differed 25 vs 34 birds). It was **wall-clock pacing**: Godot
+advances on real time, so frame pacing under load decided how much game time
+passed between the harness's deploys. `--fixed-fps 60` makes three consecutive
+runs byte-identical and restores monotonicity — a weaker defender now correctly
+measures as a cheaper level.
+
+That is three defects in how this project measures itself: `randomize()`
+clobbering `--seed`, headless not playing the same game, and wall-clock pacing.
+**Every per-cell number in this file predating that fix carries real noise.**
+Aggregate counts across seeds hold; single-cell percentages and any A/B decided
+by a few birds do not. A full re-verification under `--fixed-fps` is running and
+this file gets the defensible numbers when it lands.
+
+### Iteration 6 — replayability (next)
+
+The campaign is now ~15-20 minutes of active play and then it is over. Stars are
+earned and do nothing. That is the biggest remaining *gameplay* gap for a Steam
+product, and it does not need new art.
+
+**Operations: modifiers that change what a bastion demands.** Replay any cleared
+bastion under a modifier, each of which invalidates a different habit:
+
+- *Blackout* — no threat overlay. The read has to come off barrel facing and
+  emplacement art, which is the skill the overlay currently does for you.
+- *Scramble* — half the wing. Every deploy is a real cost.
+- *Ace flight* — all four mounts live, faster cycle, from bastion 1.
+- *Silent running* — no decoy charges, so lanes must be found rather than made.
+
+Stars become a currency that gates the next tier, and 20 bastions become 60-80
+distinct tactical problems without a single new asset. Design constraint: each
+modifier must change *what the player does*, not just how much HP something has
+— an operation that is only a stat multiplier is a difficulty slider wearing a
+hat.
 
 The finale gate is not a tuning problem, so iteration 5 stops tuning. Every
 defender in the game is bolted down: a mount slews its sector but never leaves
