@@ -144,15 +144,20 @@ const DECOY_SPRITE_SCALE := Vector2(0.92, 0.92)
 ## counterplay. They are lurable by decoys on the same terms as every other
 ## defender, so the feint layer answers them too.
 ##
-## Introduced at 17 rather than at a stronghold: bastions 10 and 15 already
-## measure at or near their limit, and 16 is the carpet wing's own new thing.
+## Introduced at 15, on measurement. Bastion 15 showed the same signature the
+## finale used to: a locked bearing was *cheaper* than adaptive play (33 and 53
+## birds against 39 and 62), which is the rule inverted rather than merely
+## unmet. The strike wing is why — jets release at STRIKE_STANDOFF and bank
+## away, so they never enter the deep contested band and nothing static ever
+## gets long enough on them to punish coming back the same way. A defender that
+## flies to the pressure does.
 ##
 ## Bastion 20 is deliberately excluded. The finale already runs a maximal fort —
 ## the largest island, the thickest outer ring, the longest reach and the highest
 ## keep HP in the campaign — and interceptors on top of that measured unwinnable
 ## by adaptive play in 6 of 6 runs across two strength settings. The finale's
 ## identity is the fortress itself; this is the late band's threat, not its.
-const INTERCEPTOR_UNLOCK_LEVEL := 17
+const INTERCEPTOR_UNLOCK_LEVEL := 15
 const INTERCEPTOR_MAX_LEVEL := 19
 ## Live at once, by level. Kept small — these are a positional threat, not a
 ## damage race, and a swarm of them would just make the finale unwinnable.
@@ -458,6 +463,12 @@ func keep_hp_for_level(level: int) -> int:
 func interceptors_for_level(level: int) -> int:
 	var n := clampi(level, 1, LEVEL_COUNT)
 	if n < INTERCEPTOR_UNLOCK_LEVEL or n > INTERCEPTOR_MAX_LEVEL:
+		return 0
+	# Never on a wing's first bastion. Those levels exist to let the player
+	# learn a new airframe, and the campaign already forgives a fixed bearing
+	# there for the same reason — dropping fighters on someone the first time
+	# they fly carpet bombers teaches nothing.
+	if n == wing_band_start(plane_type_for_level(n)):
 		return 0
 	return INTERCEPTOR_MAX_ALIVE
 
