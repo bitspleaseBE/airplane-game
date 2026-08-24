@@ -149,8 +149,14 @@ const DECOY_SPRITE_SCALE := Vector2(0.92, 0.92)
 const INTERCEPTOR_UNLOCK_LEVEL := 17
 ## Live at once, by level. Kept small — these are a positional threat, not a
 ## damage race, and a swarm of them would just make the finale unwinnable.
+## First tuning: the opening values made bastion 20 unwinnable by any strategy.
+## They were, however, doing the job no number could — adaptive play delivered
+## about three times what a locked bearing did, against a ~10% spread under
+## static guns. So the mechanic stays and its strength comes down: the finale
+## drops to the same live cap as the rest of the band, and the guns cycle
+## slower and reach less far.
 const INTERCEPTOR_MAX_ALIVE := 2
-const INTERCEPTOR_MAX_ALIVE_FINALE := 3
+const INTERCEPTOR_MAX_ALIVE_FINALE := 2
 const INTERCEPTOR_LAUNCH_INTERVAL := 6.0
 ## First one is airborne shortly after the siege opens, so the player meets the
 ## mechanic while they still have a wing to learn it with.
@@ -160,8 +166,8 @@ const INTERCEPTOR_SPEED := 205.0
 ## bomber down from behind removes the counterplay, which is that changing
 ## bearing makes them spend their time travelling instead of shooting.
 const INTERCEPTOR_HP := 12
-const INTERCEPTOR_ENGAGE_RANGE := 190.0
-const INTERCEPTOR_FIRE_COOLDOWN := 1.1
+const INTERCEPTOR_ENGAGE_RANGE := 150.0
+const INTERCEPTOR_FIRE_COOLDOWN := 1.7
 ## How far out it will hold station from the keep while hunting.
 const INTERCEPTOR_PATROL_RADIUS := 300.0
 ## Seconds it stays committed to one bird, matching the corner guns so the whole
