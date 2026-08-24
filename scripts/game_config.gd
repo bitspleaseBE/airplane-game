@@ -48,13 +48,12 @@ const GUNSHIP_SPEED_MULT := 1.08
 ## at the old 160 meant the jets flew almost to the keep before releasing, which
 ## is the bomber's job and got them killed doing it.
 ##
-## Trimmed from 230 on measurement. At 230 the strike band was the one place a
-## locked bearing was *cheaper* than adaptive play: a jet released and turned for
-## home before it was ever properly under the guns, so sector slew — the whole
-## mechanism that punishes coming back the same way — never got time on it.
-## Releasing deeper does not make the wing weaker so much as it makes repetition
-## cost something, which is the only thing bastion 15 was missing.
-const STRIKE_STANDOFF := 185.0
+## Trimming this to 185 was tried, on the theory that a jet releasing before it
+## was properly under the guns is why sector slew never punishes repetition in
+## this band. It measured worse on both counts — a locked bearing went from
+## taking bastion 15 on 2 seeds of 2 to 3 of 3, and adaptive play tightened to
+## 64-100% of the wing — so the standoff is left alone.
+const STRIKE_STANDOFF := 230.0
 const STRIKE_MISSILE_DAMAGE := 20
 const STRIKE_MISSILE_SPEED := 300.0
 const STRIKE_MISSILE_TURN_RATE := 4.5
@@ -301,14 +300,13 @@ const TURRET_WATER_REACH := 105.0
 const TURRET_RANGE_CAP := 560.0
 ## Extra reach the milestone strongholds hold beyond the normal curve.
 ##
-## Kept after testing its removal. The theory was that this was only ever a
-## workaround for mounts that did not scale with their island, and that with the
-## fort scaled it would blanket every bearing and erase the cold water the tactic
-## reads. Measured, removing it was clearly worse: a locked bearing went from
-## losing 2 of 2 at bastion 15 to winning, and the finale got softer still. The
-## strongholds need both — a real gun ring *and* the reach to hold the water
-## outside it.
-const TURRET_STRONGHOLD_REACH := 120.0
+## Removal was tested once and rejected — but that verdict came off the
+## wall-clock harness, before runs were reproducible, so it was drawn from noise
+## and is being re-tested rather than trusted. The theory it was rejecting is
+## still the live one: this was a workaround for mounts that did not scale with
+## their island, and now that the fort scales, blanketing every bearing with
+## reach erases the cold water the whole tactic reads.
+const TURRET_STRONGHOLD_REACH := 0.0
 const TURRET_ROTATE_SPEED := 3.5
 ## How fast a barrel swings, rad/s. Deliberately slower than a plane's run: a
 ## gun facing the wrong way stays wrong for long enough that the player can
