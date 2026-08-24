@@ -47,7 +47,14 @@ const GUNSHIP_SPEED_MULT := 1.08
 ## has to scale with that reach: corner guns now cover up to 470, and launching
 ## at the old 160 meant the jets flew almost to the keep before releasing, which
 ## is the bomber's job and got them killed doing it.
-const STRIKE_STANDOFF := 230.0
+##
+## Trimmed from 230 on measurement. At 230 the strike band was the one place a
+## locked bearing was *cheaper* than adaptive play: a jet released and turned for
+## home before it was ever properly under the guns, so sector slew — the whole
+## mechanism that punishes coming back the same way — never got time on it.
+## Releasing deeper does not make the wing weaker so much as it makes repetition
+## cost something, which is the only thing bastion 15 was missing.
+const STRIKE_STANDOFF := 185.0
 const STRIKE_MISSILE_DAMAGE := 20
 const STRIKE_MISSILE_SPEED := 300.0
 const STRIKE_MISSILE_TURN_RATE := 4.5
@@ -144,20 +151,19 @@ const DECOY_SPRITE_SCALE := Vector2(0.92, 0.92)
 ## counterplay. They are lurable by decoys on the same terms as every other
 ## defender, so the feint layer answers them too.
 ##
-## Introduced at 15, on measurement. Bastion 15 showed the same signature the
-## finale used to: a locked bearing was *cheaper* than adaptive play (33 and 53
-## birds against 39 and 62), which is the rule inverted rather than merely
-## unmet. The strike wing is why — jets release at STRIKE_STANDOFF and bank
-## away, so they never enter the deep contested band and nothing static ever
-## gets long enough on them to punish coming back the same way. A defender that
-## flies to the pressure does.
+## Introduced at 17. Tried at 15 and reverted: it made bastion 15 harder for
+## everyone (adaptive play went to 84-100% of the wing, one seed spending all of
+## it) without reliably closing the gate there — a locked bearing still took one
+## seed in three. That is the same way the finale experiment failed. Interceptors
+## raise the floor; they do not by themselves separate two strategies when the
+## wing barely enters the contested band at all.
 ##
 ## Bastion 20 is deliberately excluded. The finale already runs a maximal fort —
 ## the largest island, the thickest outer ring, the longest reach and the highest
 ## keep HP in the campaign — and interceptors on top of that measured unwinnable
 ## by adaptive play in 6 of 6 runs across two strength settings. The finale's
 ## identity is the fortress itself; this is the late band's threat, not its.
-const INTERCEPTOR_UNLOCK_LEVEL := 15
+const INTERCEPTOR_UNLOCK_LEVEL := 17
 const INTERCEPTOR_MAX_LEVEL := 19
 ## Live at once, by level. Kept small — these are a positional threat, not a
 ## damage race, and a swarm of them would just make the finale unwinnable.
