@@ -68,6 +68,16 @@ var _direct_spawns := 0
 var _missed_deploys := 0
 var _deployed := 0
 var _decoys_sent := 0
+## The harness draws from its own stream, never the global one.
+##
+## Every placement decision below used to call the global randf()/randi(), which
+## combat also draws from — Sfx._play picks a pitch per one-shot, Turret._fire
+## jitters its aim. So the number of planes that died earlier in a run decided
+## which numbers the harness got later, and any balance change alters how many
+## planes die. That made --seed isolate nothing across exactly the comparisons
+## it exists for: weakening a defender measured as making two bastions *harder*,
+## which is impossible, and was this coupling rather than a real effect.
+var _rng := RandomNumberGenerator.new()
 
 
 ## The seed the harness was asked to run, or -1 for none. Read by main.gd,
@@ -151,8 +161,13 @@ func _ready() -> void:
 		_shot_interval = 100000.0
 	if not _show_pause.is_empty():
 		process_mode = Node.PROCESS_MODE_ALWAYS
+	# Seed both: the harness's own stream for placement, and the global one so
+	# the level's procedural content is still reproducible.
 	if _rng_seed >= 0:
+		_rng.seed = _rng_seed
 		seed(_rng_seed)
+	else:
+		_rng.randomize()
 	DirAccess.make_dir_recursive_absolute(_abs_out())
 	AudioServer.set_bus_mute(0, true)
 	# Keep the window unoccluded: macOS stops presenting frames for hidden
@@ -492,9 +507,9 @@ func _deploy_radius(theta: float, water_min: float) -> float:
 	var far := maxf(_max_visible_radius(theta), near)
 	match _strategy:
 		"flank", "column", "decoy":
-			return clampf(water_min + randf_range(20.0, 110.0), near, far)
+			return clampf(water_min + _rng.randf_range(20.0, 110.0), near, far)
 		_:
-			return clampf(water_min + randf_range(20.0, 420.0), near, far)
+			return clampf(water_min + _rng.randf_range(20.0, 420.0), near, far)
 
 
 ## Furthest a deploy can sit from the bastion along `theta` and still be on
@@ -519,7 +534,7 @@ func _deploy_angle(i: int) -> float:
 	match _strategy:
 		"blitz":
 			# Panic-dump: mash taps anywhere around the island.
-			return randf() * TAU
+			return _rng.randf() * TAU
 		"flank":
 			# Skilled placement proxy: send the bird in where the bastion's guns
 			# are not currently looking. This is the strategy the threat readout
@@ -534,14 +549,14 @@ func _deploy_angle(i: int) -> float:
 			if !_column_locked:
 				_column_locked = true
 				_column_angle = _coldest_angle()
-			return _column_angle + randf_range(-0.05, 0.05)
+			return _column_angle + _rng.randf_range(-0.05, 0.05)
 		"waves":
 			# Each squad of WAVE_SIZE attacks from the next side (N/E/S/W).
 			var wave := i / WAVE_SIZE
-			return TAU * 0.25 * float(wave % 4) + randf_range(-0.5, 0.5)
+			return TAU * 0.25 * float(wave % 4) + _rng.randf_range(-0.5, 0.5)
 		_:
 			# spread: patient, evenly distributed around the island.
-			return TAU * float(i) / float(maxi(_planes_to_spawn, 1)) + randf_range(-0.15, 0.15)
+			return TAU * float(i) / float(maxi(_planes_to_spawn, 1)) + _rng.randf_range(-0.15, 0.15)
 
 
 ## Score every approach corridor by how much living gun attention covers the
@@ -565,9 +580,9 @@ const DECOY_EVERY := 5
 func _coldest_angle() -> float:
 	var scored := _scored_bearings()
 	if scored.is_empty():
-		return randf() * TAU
-	var pick: Array = scored[randi() % mini(FLANK_COLD_BAND, scored.size())]
-	return float(pick[1]) + randf_range(-0.12, 0.12)
+		return _rng.randf() * TAU
+	var pick: Array = scored[_rng.randi() % mini(FLANK_COLD_BAND, scored.size())]
+	return float(pick[1]) + _rng.randf_range(-0.12, 0.12)
 
 
 ## Where to throw a feint in order to open `lane`.
@@ -583,7 +598,7 @@ const FEINT_OFFSET := 0.92  # ~53°, just inside SECTOR_HOME_SPAN
 
 func _feint_angle(lane: float) -> float:
 	var side := 1.0 if _decoys_sent % 2 == 0 else -1.0
-	return lane + side * FEINT_OFFSET + randf_range(-0.08, 0.08)
+	return lane + side * FEINT_OFFSET + _rng.randf_range(-0.08, 0.08)
 
 
 ## Every approach bearing paired with how much living gun attention covers the

@@ -5,6 +5,12 @@
 #        LEVEL=3 tools/balance_check.sh    # a specific level
 #        SEED=11 LEVEL=10 tools/balance_check.sh
 #
+# --fixed-fps 60 is not optional either. Without it the engine advances on wall
+# clock, so frame pacing under load decides how much game time passes between
+# the harness's deploys — and identical configs measured 25 vs 34 birds on the
+# same level and seed. With it, three consecutive runs are byte-identical.
+# (Never pass it to perf_check.sh, which exists to measure real frame times.)
+#
 # NEVER run these scenarios with --headless. The dummy renderer changes how the
 # siege plays out — measured side by side, the same level and seed resolved in
 # ~150 s headless and ~25 s rendered, with opposite win/lose outcomes. Every
@@ -34,7 +40,8 @@ for strat in "${STRATEGIES[@]}"; do
   mkdir -p "$OUT"
   rm -f "$OUT"/*.png "$OUT"/summary.json
   echo "--- strategy: $strat (level $LEVEL, seed $SEED) ---"
-  ${RUNNER[@]+"${RUNNER[@]}"} "$GODOT" --path . --resolution 720x1280 --audio-driver Dummy -- \
+  ${RUNNER[@]+"${RUNNER[@]}"} "$GODOT" --path . --resolution 720x1280 --audio-driver Dummy \
+    --fixed-fps 60 -- \
     --playtest --out="$OUT" --strategy="$strat" \
     --planes=all --duration=300 --shot-interval=120 --seed="$SEED" --level="$LEVEL"
 done

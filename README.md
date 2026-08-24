@@ -50,6 +50,17 @@ ate the level advance.
 after the harness seeded, so every "seeded" balance result was really
 run-to-run noise. Same seed, same outcome.
 
+**Balance runs need `--fixed-fps 60`.** Without it Godot advances on the wall
+clock, so frame pacing under load decides how much game time passes between the
+harness's deploys: the same level and seed measured 25 and 34 birds on two
+back-to-back runs. With it, three consecutive runs come back byte-identical, and
+a weaker defender correctly measures as a cheaper level. Never pass it to
+`tools/perf_check.sh`, whose whole job is measuring real frame times.
+
+This matters more than it sounds. `--seed` alone was never enough, and results
+gathered without it can invert: weakening a defender measured as making two
+bastions *harder*, which is impossible. `tools/balance_check.sh` passes it.
+
 **Never run a balance scenario with `--headless`.** The dummy renderer does not
 play the same game. Measured side by side on the same level and seed, a siege
 resolved in ~150 s headless and ~25 s rendered, with *opposite* win/lose
