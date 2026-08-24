@@ -76,6 +76,10 @@ var _keep_radius: float = GameConfig.KEEP_RADIUS
 var _coast_shape: CoastShape = CoastShape.ROUND
 var _beach: BeachQuad
 var _built := false
+## Airborne defenders. Only the late bastions field them — see GameConfig.
+var _interceptor_scene: PackedScene = preload("res://scenes/interceptor.tscn")
+var _interceptor_cap: int = 0
+var _interceptor_timer: float = 0.0
 
 var _keep_scene: PackedScene = preload("res://scenes/keep.tscn")
 var _turret_scene: PackedScene = preload("res://scenes/turret.tscn")
@@ -87,6 +91,7 @@ var _noise_tex: Texture2D = preload("res://assets/textures/water_noise.png")
 @onready var keep: Keep = $Keep
 @onready var turrets_root: Node2D = $Turrets
 @onready var towers_root: Node2D = $Towers
+@onready var interceptors_root: Node2D = $Interceptors
 
 
 func build(level_num: int, main_ref: Node2D) -> void:
@@ -132,6 +137,8 @@ func build(level_num: int, main_ref: Node2D) -> void:
 	_place_turrets()
 	_scatter_towers()
 	_scatter_trees()
+	_interceptor_cap = GameConfig.interceptors_for_level(level)
+	_interceptor_timer = GameConfig.INTERCEPTOR_FIRST_LAUNCH
 	_built = true
 	set_active(false)
 
@@ -251,6 +258,8 @@ func is_built() -> bool:
 
 
 func reset_for_retry() -> void:
+	_clear_children(interceptors_root)
+	_interceptor_timer = GameConfig.INTERCEPTOR_FIRST_LAUNCH
 	# Keep the silhouette; reshuffle only living defenses.
 	_rng.seed = hash("bastion_%d_retry" % level)
 	_clear_defenses(true)
@@ -327,10 +336,25 @@ func apply_bomb_at(pos: Vector2, damage: int) -> void:
 		if tower is Tower and is_instance_valid(tower) and not tower.is_destroyed():
 			if pos.distance_to(tower.global_position) <= GameConfig.PLANE_BOMB_RADIUS + 28.0:
 				tower.take_damage(GameConfig.TOWER_BOMB_DAMAGE)
+	_damage_interceptors_at(pos, GameConfig.PLANE_BOMB_RADIUS, damage)
+
+
+## Airborne defenders take splash and strafing fire like anything else. Without
+## this they would be the one threat in the game with no answer, which is the
+## opposite of the point — an interceptor is meant to be a problem you can
+## either shoot or fly around.
+func _damage_interceptors_at(pos: Vector2, radius: float, damage: int) -> void:
+	for child in interceptors_root.get_children():
+		if child is Interceptor and child.is_alive():
+			if pos.distance_to(child.global_position) <= radius:
+				child.take_damage(damage)
 
 
 ## Point damage from a gunship strafe — hits whatever sits under the impact.
 func apply_gunfire_at(pos: Vector2, damage: int) -> void:
+	# An interceptor overhead is the most urgent thing a strafing run can hit,
+	# and it is the only defender that will otherwise follow the bird home.
+	_damage_interceptors_at(pos, 34.0, damage)
 	# Prefer living guns so SEAD runs actually soft the nest.
 	for turret in turrets_root.get_children():
 		if turret is Turret and is_instance_valid(turret) and not turret.is_destroyed():
@@ -402,6 +426,44 @@ func _clear_children(node: Node) -> void:
 		var c := node.get_child(0)
 		node.remove_child(c)
 		c.free()
+
+
+## Launch loop for the airborne defenders. Runs only while this island is the
+## one under siege, so background bastions never spend frames on it.
+func _process(delta: float) -> void:
+	if scenic or not active or not _built or _interceptor_cap <= 0:
+		return
+	if _main == null or not ("state" in _main) or _main.state != _main.State.PLAYING:
+		return
+	if _living_interceptors() >= _interceptor_cap:
+		return
+	_interceptor_timer -= delta
+	if _interceptor_timer > 0.0:
+		return
+	_interceptor_timer = GameConfig.INTERCEPTOR_LAUNCH_INTERVAL
+	_launch_interceptor()
+
+
+func _living_interceptors() -> int:
+	var n := 0
+	for child in interceptors_root.get_children():
+		if child is Interceptor and child.is_alive():
+			n += 1
+	return n
+
+
+func _launch_interceptor() -> void:
+	var fighter: Interceptor = _interceptor_scene.instantiate()
+	interceptors_root.add_child(fighter)
+	# Off the fort itself, so it reads as scrambling from the stronghold.
+	var bearing := _rng.randf() * TAU
+	fighter.setup(
+		get_center() + Vector2.from_angle(bearing) * (_fort_clear * 0.6), get_center(), _main
+	)
+	fighter.destroyed.connect(func(pos: Vector2) -> void:
+		if _main and _main.has_method("spawn_gun_kill_flash"):
+			_main.spawn_gun_kill_flash(pos)
+	)
 
 
 func _clear_defenses(_keep_keep: bool) -> void:

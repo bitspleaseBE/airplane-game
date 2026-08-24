@@ -37,6 +37,12 @@ The three things that decide it:
 - [ ] Store assets: capsule art, trailer, screenshots, description
 - [ ] Legal: EULA, credits screen, third-party licence attributions in-game
 
+## Branches
+
+- `claude/airplane-game-triple-a-7vkgmm` — PR #11, under review. Frozen.
+- `claude/airplane-game-steam-round2` — active. Branched off the PR so the work
+  stacks; rebase after #11 merges.
+
 ## P1 — decides whether it reads as premium
 
 - [x] A second verb. Placement was the only decision; decoy drones let the
@@ -175,7 +181,29 @@ repeats them: trimming bomber speed to 1.22 (worse and noisier), and removing
 the stronghold reach bonus on the theory that the scaled ring made it redundant
 (clearly worse — it flipped bastion 15 from pass to fail).
 
-**Still open: the finale.** A locked bearing still wins bastion 20, though it
+### Iteration 5 — interceptors (in progress)
+
+The finale gate is not a tuning problem, so iteration 5 stops tuning. Every
+defender in the game is bolted down: a mount slews its sector but never leaves
+its corner. Against static guns, flying one bearing repeatedly and flying a
+different one each time cost within ~10% of each other at bastion 20, which is
+why no squadron size or HP curve could separate them. Discrimination has to be
+*positional*, and only something that can move to where the player keeps
+attacking provides it.
+
+Interceptors: the stronghold launches its own fighters, they fly to whichever
+water the raid is pressing and hold there. Lean on one lane and they stack over
+it; switch lanes and they have to transit the island first, and that transit is
+the window the player is buying. Deliberately slower than every attacking wing —
+a fighter that runs a bomber down from behind would delete the counterplay and
+just be more damage. Shootable by strafing runs and blasts, and lurable by
+decoys on the same terms as every other defender, so the feint layer composes
+with it.
+
+Introduced at bastion 17: 10 and 15 already measure at or near their limit, and
+16 is the carpet wing's own new thing.
+
+**Previously open, now being addressed by the above:** A locked bearing still wins bastion 20, though it
 now pays 70-96% of the wing to do it against 13 birds of 76 before. Nine
 measured rounds of squadron size, keep HP, emplacement HP, ring density, slew
 speed and span, AA reach, carpet release and the ring geometry have not

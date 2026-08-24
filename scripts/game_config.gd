@@ -125,6 +125,50 @@ const DECOY_ORBIT_MIN_MARGIN := 40.0
 const DECOY_TINT := Color(1.0, 0.86, 0.42)
 const DECOY_SPRITE_SCALE := Vector2(0.92, 0.92)
 
+## --- Interceptors ---------------------------------------------------------
+##
+## The fort's own mobile defender, and the answer to the one gate that numbers
+## could not close.
+##
+## Every emplacement in the game is *static*: a mount can slew its sector but it
+## cannot leave its corner. That is why the finale resisted nine rounds of
+## tuning — with fixed guns, flying the same bearing repeatedly and flying a
+## different one each time cost within ~10% of each other, so no squadron size
+## or HP curve could tell good play from bad. Discrimination has to be
+## positional, and only something that can *move to where you keep attacking*
+## provides it.
+##
+## An interceptor launches from the keep, flies to whichever water the raid is
+## pressing, and holds there. Lean on one bearing and they stack up on it. Move,
+## and they have to transit — and transit is dead time, which is the whole
+## counterplay. They are lurable by decoys on the same terms as every other
+## defender, so the feint layer answers them too.
+##
+## Introduced at 17 rather than at a stronghold: bastions 10 and 15 already
+## measure at or near their limit, and 16 is the carpet wing's own new thing.
+const INTERCEPTOR_UNLOCK_LEVEL := 17
+## Live at once, by level. Kept small — these are a positional threat, not a
+## damage race, and a swarm of them would just make the finale unwinnable.
+const INTERCEPTOR_MAX_ALIVE := 2
+const INTERCEPTOR_MAX_ALIVE_FINALE := 3
+const INTERCEPTOR_LAUNCH_INTERVAL := 6.0
+## First one is airborne shortly after the siege opens, so the player meets the
+## mechanic while they still have a wing to learn it with.
+const INTERCEPTOR_FIRST_LAUNCH := 4.0
+const INTERCEPTOR_SPEED := 205.0
+## Slower than every attacking wing. It has to be: an interceptor that can run a
+## bomber down from behind removes the counterplay, which is that changing
+## bearing makes them spend their time travelling instead of shooting.
+const INTERCEPTOR_HP := 12
+const INTERCEPTOR_ENGAGE_RANGE := 190.0
+const INTERCEPTOR_FIRE_COOLDOWN := 1.1
+## How far out it will hold station from the keep while hunting.
+const INTERCEPTOR_PATROL_RADIUS := 300.0
+## Seconds it stays committed to one bird, matching the corner guns so the whole
+## fortress reads the same way.
+const INTERCEPTOR_LOCK_TIME := 1.25
+const INTERCEPTOR_TINT := Color(0.85, 0.38, 0.42)
+
 ## Stronghold evolution — staggered so no level introduces two new things.
 const MISSILE_TOWER_UNLOCK_LEVEL := 4
 const FLAK_TOWER_UNLOCK_LEVEL := 13
@@ -400,6 +444,13 @@ func fort_clear_radius_for_level(level: int) -> float:
 
 func keep_hp_for_level(level: int) -> int:
 	return KEEP_MAX_HP + (clampi(level, 1, LEVEL_COUNT) - 1) * KEEP_HP_PER_LEVEL
+
+
+func interceptors_for_level(level: int) -> int:
+	var n := clampi(level, 1, LEVEL_COUNT)
+	if n < INTERCEPTOR_UNLOCK_LEVEL:
+		return 0
+	return INTERCEPTOR_MAX_ALIVE_FINALE if n >= LEVEL_COUNT else INTERCEPTOR_MAX_ALIVE
 
 
 func turret_count_for_level(level: int) -> int:
