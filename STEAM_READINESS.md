@@ -220,6 +220,41 @@ Aggregate counts across seeds hold; single-cell percentages and any A/B decided
 by a few birds do not. A full re-verification under `--fixed-fps` is running and
 this file gets the defensible numbers when it lands.
 
+### The defensible gate matrix, and two corrections
+
+Re-run under `--fixed-fps`, 2 seeds per cell. Win/loss and bird counts below are
+game state and trustworthy; the durations in that sweep were not, and are
+excluded — see the timing note after the table.
+
+| Bastion | adaptive (flank) | fixed bearing (column) | gate |
+|---|---|---|---|
+| 1  | won 2/2, 47%     | won 2/2      | forgiving by design |
+| 5  | won 2/2, 63-66%  | **lost 2/2** | pass |
+| 10 | won 2/2, 56-58%  | lost 1/2     | marginal |
+| 15 | won 2/2, 51-81%  | **won 2/2**  | **fail** |
+| 17 | won 2/2, 61-83%  | **lost 2/2** | pass |
+| 18 | won 2/2, 33-40%  | **lost 2/2** | pass |
+| 20 | won 2/2, 47-87%  | **lost 2/2** | pass |
+
+**Correction 1: bastion 20 passes.** This file, the README and PR #11 all said a
+locked bearing still takes the finale and that no lever could stop it. Measured
+properly, a locked bearing loses both seeds *without scratching the keep*
+(493/493 remaining). The fort scaling and the ordnance retune did close it; the
+wall-clock harness was reporting the opposite outcome.
+
+**Correction 2: bastion 15 is the real failure**, where a clean pass was
+previously claimed. A locked bearing wins both seeds on 43-69% of the wing.
+That is now the open gate, and 10 is marginal at 1 of 2.
+
+Adaptive play wins 14 of 14 across every cell, so winnability is not in question
+anywhere.
+
+**Timing note.** `elapsed_s` was wall-clock, which under `--fixed-fps` diverges
+from simulated time by about 2x on a software renderer — a bastion measured at
+160s was really ~80s of play. The harness now accumulates delta and reports
+game time as `elapsed_s`, keeping wall clock as `wall_s` for spotting hung runs.
+Duration figures anywhere in this repo predating that change are inflated.
+
 ### Iteration 6 — replayability (next)
 
 The campaign is now ~15-20 minutes of active play and then it is over. Stars are

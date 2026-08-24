@@ -63,6 +63,7 @@ var _result := "timeout"
 var _shots: PackedStringArray = []
 var _shot_index := 0
 var _start_ms := 0
+var _game_time := 0.0
 var _input_taps := 0
 var _direct_spawns := 0
 var _missed_deploys := 0
@@ -184,6 +185,13 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	# Game time, not wall time. Under --fixed-fps the engine advances a fixed
+	# delta per frame regardless of how long the frame actually took, so on a
+	# software renderer wall clock runs far ahead of the simulation — a bastion
+	# that takes 50s of game time reported 160s of wall clock, which is not a
+	# number the duration gate can use. Accumulating delta gives the figure a
+	# player would experience.
+	_game_time += delta
 	if not _perf:
 		return
 	# The game re-feeds island arrays to the ocean shader as builds finish, so
@@ -699,6 +707,7 @@ func _write_summary() -> void:
 		"level": _level,
 		"seed": _rng_seed,
 		"elapsed_s": snappedf(_elapsed(), 0.1),
+		"wall_s": snappedf(_wall_elapsed(), 0.1),
 		"keep_hp": _main.keep.hp if is_instance_valid(_main) and _main.keep != null else -1,
 		"planes_remaining": _main.planes_remaining if is_instance_valid(_main) and "planes_remaining" in _main else -1,
 		"planes_deployed": _deployed,
@@ -777,7 +786,15 @@ func _stats(samples: PackedFloat32Array) -> Dictionary:
 	}
 
 
+## Seconds of simulated game time since the run began — what a player would
+## have sat through. Duration gates read this.
 func _elapsed() -> float:
+	return _game_time
+
+
+## Wall-clock seconds. Only useful for spotting a hung run; under --fixed-fps it
+## has no relationship to how long the siege takes to play.
+func _wall_elapsed() -> float:
 	return float(Time.get_ticks_msec() - _start_ms) / 1000.0
 
 

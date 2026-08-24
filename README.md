@@ -192,19 +192,15 @@ Orientation is locked to portrait in the preset.
 - Stronghold arsenal: machine guns from level 1, missile launchers from 4, flak airbursts from 13 (downs every plane within 60 px of the burst)
 - Difficulty is staggered one step at a time: third corner gun at 3, missile launcher at 4, faster gun cycle at 5
 - Defense pads are color-coded: red = keep AA, green = MG, amber = missile, crimson = flak
-- **Known gap — a fixed bearing still wins the finale.** Current measured state
-  (rendered, 2-3 seeds per cell): every bastion is winnable, adaptive play
-  (`flank`) spends 48-100% of its wing (mostly 52-84%), and wins land in 23-90s.
-  A locked bearing (`column`) now loses 2 of 2 at bastion 15 and 1 of 2 at
-  bastion 10, but still wins bastion 20, where it must never win — and it spends
-  70-96% of the wing doing it, against 13 birds of 76 before any of this work.
-  The finale resists every lever tried across nine measured rounds: squadron
-  size, keep HP, emplacement HP, ring density, slew speed and span, AA reach,
-  the carpet release point, and the gun-ring geometry itself. What is left is
-  that at bastion 20 adaptive and fixed-bearing play cost within ~10% of each
-  other, so no threshold separates them; the discrimination has to come from a
-  mechanic, not a number. Worth noting the reach bonus above is load-bearing
-  here: removing it flipped bastion 15 from a clean pass to a fail
+- **Known gap — a fixed bearing still wins bastion 15.** Measured under
+  `--fixed-fps` at 2 seeds per cell, adaptive play wins every bastion (14 of 14)
+  spending 33-87% of its wing. A locked bearing correctly fails at 5, 17, 18 and
+  20 — the finale turns it away without the keep taking a scratch — but still
+  takes bastion 15 on 43-69% of the wing, and bastion 10 on 1 of 2 seeds.
+  Bastion 1 forgives it by design while the player is learning. Earlier
+  revisions of this file named bastion 20 as the failure and 15 as a pass; that
+  was measured on a harness whose runs were not reproducible, and it was
+  backwards
 - **Known gap — stronghold gun placement, probably the same bug.** `island.gd::_place_turrets` seats all
   four corner guns at a fixed ~105 px from the island centre
   (`FORT_CLEAR_RADIUS * 0.95`) whatever the island's size, because they sit on
