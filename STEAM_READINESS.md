@@ -220,40 +220,54 @@ Aggregate counts across seeds hold; single-cell percentages and any A/B decided
 by a few birds do not. A full re-verification under `--fixed-fps` is running and
 this file gets the defensible numbers when it lands.
 
-### The defensible gate matrix, and two corrections
+### The gate matrix — measured on a harness that works
 
-Re-run under `--fixed-fps`, 2 seeds per cell. Win/loss and bird counts below are
-game state and trustworthy; the durations in that sweep were not, and are
-excluded — see the timing note after the table.
+`--fixed-fps`, game-time durations, 2-3 seeds per cell.
 
-| Bastion | adaptive (flank) | fixed bearing (column) | gate |
-|---|---|---|---|
-| 1  | won 2/2, 47%     | won 2/2      | forgiving by design |
-| 5  | won 2/2, 63-66%  | **lost 2/2** | pass |
-| 10 | won 2/2, 56-58%  | lost 1/2     | marginal |
-| 15 | won 2/2, 51-81%  | **won 2/2**  | **fail** |
-| 17 | won 2/2, 61-83%  | **lost 2/2** | pass |
-| 18 | won 2/2, 33-40%  | **lost 2/2** | pass |
-| 20 | won 2/2, 47-87%  | **lost 2/2** | pass |
+| Bastion | adaptive (flank) | fixed bearing (column) | duration | gate |
+|---|---|---|---|---|
+| 1  | won, 47%     | won          | 28s    | forgiving by design |
+| 5  | won, 63-66%  | **lost 2/2** | 49-52s | pass |
+| 10 | won, 62-68%  | **lost 2/2** | 30-33s | pass |
+| 11 | won, 42-44%  | won          | 15s    | wing's first — forgiving |
+| 13 | won, 43%     | **lost 2/2** | 18s    | pass |
+| 15 | won, 47-71%  | **won 2/3**  | 22-32s | **fail** |
+| 16 | won, 32-40%  | **lost 2/2** | 22-27s | pass |
+| 17 | won, 61-83%  | **lost 2/2** | 44-60s | pass |
+| 18 | won, 33-40%  | **lost 2/2** | 52-63s | pass |
+| 20 | won, 60-87%  | **lost 2/2** | 54-77s | pass |
 
-**Correction 1: bastion 20 passes.** This file, the README and PR #11 all said a
-locked bearing still takes the finale and that no lever could stop it. Measured
-properly, a locked bearing loses both seeds *without scratching the keep*
-(493/493 remaining). The fort scaling and the ordnance retune did close it; the
-wall-clock harness was reporting the opposite outcome.
+Adaptive play wins every cell. A fixed bearing is turned away everywhere except
+bastion 15, and on the two levels the campaign deliberately forgives.
 
-**Correction 2: bastion 15 is the real failure**, where a clean pass was
-previously claimed. A locked bearing wins both seeds on 43-69% of the wing.
-That is now the open gate, and 10 is marginal at 1 of 2.
+**Durations sit in the 30-90s gate or just under it.** Everything quoted before
+the game-time fix was ~2x inflated.
 
-Adaptive play wins 14 of 14 across every cell, so winnability is not in question
-anywhere.
+### Corrections this branch had to make to itself
 
-**Timing note.** `elapsed_s` was wall-clock, which under `--fixed-fps` diverges
-from simulated time by about 2x on a software renderer — a bastion measured at
-160s was really ~80s of play. The harness now accumulates delta and reports
-game time as `elapsed_s`, keeping wall clock as `wall_s` for spotting hung runs.
-Duration figures anywhere in this repo predating that change are inflated.
+1. **Bastion 20 passes**, having been reported as the one unfixable failure.
+2. **Bastion 15 is the real failure**, having been reported as a clean pass.
+3. **The stronghold reach bonus should have been removed.** It was kept because
+   removing it "measured clearly worse" — a verdict from the wall-clock harness,
+   i.e. from noise. Re-tested properly, removal turns bastion 10 from marginal
+   into a clean pass and leaves the finale untouched.
+
+All three came from the same root: strong conclusions drawn from an instrument
+that had not been validated. Four defects were found in it in the end —
+`randomize()` clobbering `--seed`, headless not playing the same game,
+wall-clock pacing, and wall-clock durations.
+
+### Open: bastion 15
+
+A locked bearing takes it on 2 seeds of 3. Three mechanisms were tried and all
+recorded in the code as rejected: interceptors there (harder for everyone
+without closing it), a shorter strike standoff (worse on both counts), and the
+reach bonus (helped 10, not 15). The strike wing releases from standoff and
+banks away, so it is the one wing that barely enters the contested band — and
+bastion 15 is the one stronghold flown with it.
+
+Left open deliberately. One level's gate compliance is worth less to a Steam
+release than the replayability gap below, and this has had enough rounds.
 
 ### Iteration 6 — replayability (next)
 

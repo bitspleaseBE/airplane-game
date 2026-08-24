@@ -193,14 +193,15 @@ Orientation is locked to portrait in the preset.
 - Difficulty is staggered one step at a time: third corner gun at 3, missile launcher at 4, faster gun cycle at 5
 - Defense pads are color-coded: red = keep AA, green = MG, amber = missile, crimson = flak
 - **Known gap — a fixed bearing still wins bastion 15.** Measured under
-  `--fixed-fps` at 2 seeds per cell, adaptive play wins every bastion (14 of 14)
-  spending 33-87% of its wing. A locked bearing correctly fails at 5, 17, 18 and
-  20 — the finale turns it away without the keep taking a scratch — but still
-  takes bastion 15 on 43-69% of the wing, and bastion 10 on 1 of 2 seeds.
-  Bastion 1 forgives it by design while the player is learning. Earlier
-  revisions of this file named bastion 20 as the failure and 15 as a pass; that
-  was measured on a harness whose runs were not reproducible, and it was
-  backwards
+  `--fixed-fps` at 2-3 seeds per cell, adaptive play wins every bastion, and a
+  locked bearing is turned away at 5, 10, 13, 16, 17, 18 and 20 — the finale
+  refuses it without the keep taking a scratch. It still takes bastion 15 on 2
+  seeds of 3. Bastions 1 and 11 forgive it by design while the player is
+  learning the loop and a new airframe. Three mechanisms were tried there and
+  rejected, each recorded in the code: interceptors, a shorter strike standoff,
+  and the stronghold reach bonus. The strike wing releases from standoff and
+  banks away, so it is the one wing that barely enters the contested band, and
+  15 is the one stronghold flown with it
 - **Known gap — stronghold gun placement, probably the same bug.** `island.gd::_place_turrets` seats all
   four corner guns at a fixed ~105 px from the island centre
   (`FORT_CLEAR_RADIUS * 0.95`) whatever the island's size, because they sit on

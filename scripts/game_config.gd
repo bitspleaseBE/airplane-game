@@ -298,15 +298,6 @@ const TURRET_WATER_REACH := 105.0
 ## approach water outside everyone's envelope, so no amount of sector slew could
 ## answer a fixed heading.
 const TURRET_RANGE_CAP := 560.0
-## Extra reach the milestone strongholds hold beyond the normal curve.
-##
-## Removal was tested once and rejected — but that verdict came off the
-## wall-clock harness, before runs were reproducible, so it was drawn from noise
-## and is being re-tested rather than trusted. The theory it was rejecting is
-## still the live one: this was a workaround for mounts that did not scale with
-## their island, and now that the fort scales, blanketing every bearing with
-## reach erases the cold water the whole tactic reads.
-const TURRET_STRONGHOLD_REACH := 0.0
 const TURRET_ROTATE_SPEED := 3.5
 ## How fast a barrel swings, rad/s. Deliberately slower than a plane's run: a
 ## gun facing the wrong way stays wrong for long enough that the player can
@@ -534,10 +525,14 @@ func tower_count_range_for_level(level: int) -> Vector2i:
 func turret_range_for_level(level: int) -> float:
 	var n := clampi(level, 1, LEVEL_COUNT)
 	var base := TURRET_RANGE_HOT if n >= 3 else TURRET_RANGE
-	var reach := clampf(island_radius_for_level(n) + TURRET_WATER_REACH, base, TURRET_RANGE_CAP)
-	if is_stronghold_level(n):
-		reach += TURRET_STRONGHOLD_REACH
-	return reach
+	# The milestone strongholds once took an extra +120 here. It was a workaround
+	# for mounts that did not scale with their island: from a huddle at the
+	# centre, only enormous reach touched the approach water at all. Once the
+	# fort scaled, the bonus became actively harmful — it blanketed every
+	# bearing, and a stronghold where no water is cold cannot reward choosing
+	# where to come in. Removing it turned bastion 10 from a marginal pass into
+	# a clean one and left the finale untouched.
+	return clampf(island_radius_for_level(n) + TURRET_WATER_REACH, base, TURRET_RANGE_CAP)
 
 
 func turret_cooldown_for_level(level: int) -> float:
